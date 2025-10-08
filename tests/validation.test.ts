@@ -55,7 +55,9 @@ describe('Command Blocking', () => {
   test('isCommandBlocked handles different extensions', () => {
     expect(isCommandBlocked('rm.cmd', blockedCommands)).toBe(true);
     expect(isCommandBlocked('del.bat', blockedCommands)).toBe(true);
-    expect(isCommandBlocked('format.com', blockedCommands)).toBe(false); // Should only match .exe, .cmd, .bat
+    expect(isCommandBlocked('format.com', blockedCommands)).toBe(true); // .com now blocked
+    expect(isCommandBlocked('del.ps1', blockedCommands)).toBe(true); // .ps1 now blocked
+    expect(isCommandBlocked('format.vbs', blockedCommands)).toBe(true); // .vbs now blocked
   });
 });
 
@@ -113,6 +115,24 @@ describe('Command Parsing', () => {
     expect(parseCommand('git commit -m "first commit" --author="John Doe"')).toEqual({
       command: 'git',
       args: ['commit', '-m', 'first commit', '--author=John Doe']
+    });
+  });
+
+  test('parseCommand handles escaped quotes', () => {
+    expect(parseCommand('echo "test \\" quote"')).toEqual({
+      command: 'echo',
+      args: ['test " quote']
+    });
+    expect(parseCommand("echo 'test \\' quote'")).toEqual({
+      command: 'echo',
+      args: ["test ' quote"]
+    });
+  });
+
+  test('parseCommand handles escaped backslashes', () => {
+    expect(parseCommand('echo "path\\\\with\\\\backslashes"')).toEqual({
+      command: 'echo',
+      args: ['path\\with\\backslashes']
     });
   });
 });
@@ -263,5 +283,15 @@ describe('Enhanced Security Validation (v0.3.0)', () => {
 
   test('blocks control characters', () => {
     expect(() => validateShellOperators('cmd\x00test', shellConfig)).toThrow('control characters');
+  });
+
+  test('blocks additional Unicode pipe homoglyphs', () => {
+    expect(() => validateShellOperators('cmd │ echo', shellConfig)).toThrow('Unicode variant');
+    expect(() => validateShellOperators('cmd ⏐ echo', shellConfig)).toThrow('Unicode variant');
+  });
+
+  test('blocks zero-width characters', () => {
+    expect(() => validateShellOperators('cmd\u200Becho', shellConfig)).toThrow('zero-width');
+    expect(() => validateShellOperators('cmd\uFEFFecho', shellConfig)).toThrow('zero-width');
   });
 });

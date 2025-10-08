@@ -238,49 +238,50 @@ export class SSHConnection {
   }
 }
 
-// Connection pool to manage multiple SSH connections
+// Connection pool to manage multiple SSH connections with LRU eviction
 export class SSHConnectionPool {
   private connections: Map<string, SSHConnection> = new Map();
-  private connectionAges: Map<string, number> = new Map();
+  private lastAccessTime: Map<string, number> = new Map();
   private readonly maxPoolSize: number = 10;
-  private readonly maxConnectionAge: number = 30 * 60 * 1000; // 30 minutes
+  private readonly maxIdleTime: number = 30 * 60 * 1000; // 30 minutes
 
-  private evictStaleConnections(): void {
+  private evictIdleConnections(): void {
     const now = Date.now();
     const toEvict: string[] = [];
 
-    for (const [id, age] of this.connectionAges) {
-      if (now - age > this.maxConnectionAge) {
+    for (const [id, lastAccess] of this.lastAccessTime) {
+      if (now - lastAccess > this.maxIdleTime) {
         toEvict.push(id);
       }
     }
 
     for (const id of toEvict) {
-      console.error(`Evicting stale SSH connection: ${id}`);
+      console.error(`Evicting idle SSH connection: ${id} (idle for ${Math.round((now - this.lastAccessTime.get(id)!) / 1000)}s)`);
       this.closeConnection(id);
     }
   }
 
-  private evictOldest(): void {
-    let oldestId: string | null = null;
-    let oldestAge = Infinity;
+  private evictLRU(): void {
+    // Evict least recently used connection
+    let lruId: string | null = null;
+    let lruTime = Infinity;
 
-    for (const [id, age] of this.connectionAges) {
-      if (age < oldestAge) {
-        oldestAge = age;
-        oldestId = id;
+    for (const [id, lastAccess] of this.lastAccessTime) {
+      if (lastAccess < lruTime) {
+        lruTime = lastAccess;
+        lruId = id;
       }
     }
 
-    if (oldestId) {
-      console.error(`Pool full, evicting oldest connection: ${oldestId}`);
-      this.closeConnection(oldestId);
+    if (lruId) {
+      console.error(`Pool full, evicting LRU connection: ${lruId} (last used ${Math.round((Date.now() - lruTime) / 1000)}s ago)`);
+      this.closeConnection(lruId);
     }
   }
 
   async getConnection(connectionId: string, config: SSHConnectionConfig): Promise<SSHConnection> {
-    // Evict stale connections periodically
-    this.evictStaleConnections();
+    // Evict idle connections periodically
+    this.evictIdleConnections();
 
     let connection = this.connections.get(connectionId);
 
@@ -292,9 +293,9 @@ export class SSHConnectionPool {
     }
 
     if (!connection) {
-      // Check if we need to evict due to pool size limit
+      // Check if we need to evict due to pool size limit (use LRU)
       if (this.connections.size >= this.maxPoolSize) {
-        this.evictOldest();
+        this.evictLRU();
       }
 
       // Create connection with failure callback
@@ -305,14 +306,14 @@ export class SSHConnectionPool {
         });
       });
       this.connections.set(connectionId, connection);
-      this.connectionAges.set(connectionId, Date.now());
+      this.lastAccessTime.set(connectionId, Date.now());
       await connection.connect();
     } else if (!connection.isActive()) {
       await connection.connect();
     }
 
-    // Update last access time
-    this.connectionAges.set(connectionId, Date.now());
+    // Update last access time for LRU tracking
+    this.lastAccessTime.set(connectionId, Date.now());
 
     return connection;
   }
@@ -330,7 +331,7 @@ export class SSHConnectionPool {
     if (connection) {
       connection.disconnect();
       this.connections.delete(connectionId);
-      this.connectionAges.delete(connectionId);
+      this.lastAccessTime.delete(connectionId);
     }
   }
 
@@ -339,7 +340,7 @@ export class SSHConnectionPool {
       connection.disconnect();
     }
     this.connections.clear();
-    this.connectionAges.clear();
+    this.lastAccessTime.clear();
   }
 
   getPoolStats(): { size: number; maxSize: number; connectionIds: string[] } {
