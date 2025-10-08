@@ -30,22 +30,64 @@ export function isArgumentBlocked(args: string[], blockedArguments: string[]): b
 }
 
 /**
+ * Check for dangerous control characters and null bytes
+ */
+export function containsDangerousCharacters(command: string): boolean {
+    // Check for null bytes
+    if (command.includes('\x00')) {
+        return true;
+    }
+
+    // Check for other dangerous control characters (except newline and tab)
+    const dangerousControlChars = /[\x01-\x08\x0B-\x0C\x0E-\x1F\x7F]/;
+    return dangerousControlChars.test(command);
+}
+
+/**
  * Validates a command for a specific shell, checking for shell-specific blocked operators
  */
 export function validateShellOperators(command: string, shellConfig: ShellConfig): void {
+    // Check for dangerous control characters first
+    if (containsDangerousCharacters(command)) {
+        throw new Error('Command contains dangerous control characters');
+    }
+
     // Skip validation if shell doesn't specify blocked operators
     if (!shellConfig.blockedOperators?.length) {
         return;
     }
 
-    // Create regex pattern from blocked operators
-    const operatorPattern = shellConfig.blockedOperators
-        .map(op => op.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))  // Escape regex special chars
-        .join('|');
-    
-    const regex = new RegExp(operatorPattern);
-    if (regex.test(command)) {
-        throw new Error(`Command contains blocked operators for this shell: ${shellConfig.blockedOperators.join(', ')}`);
+    // Enhanced operator blocking with more comprehensive patterns
+    const dangerousOperators = [
+        ...shellConfig.blockedOperators,
+        // Add common redirection and injection operators
+        '>',   // Output redirection
+        '<',   // Input redirection
+        '>>',  // Append redirection
+        '2>',  // Error redirection
+        '2>&1' // Combine streams
+    ];
+
+    // Check for each operator explicitly (no regex escaping issues)
+    for (const op of dangerousOperators) {
+        if (command.includes(op)) {
+            throw new Error(`Command contains blocked operator: ${op}`);
+        }
+    }
+
+    // Check for Unicode variants of common operators
+    const unicodeVariants = {
+        '|': ['｜', '\uFF5C'],  // Fullwidth vertical line
+        ';': ['；', '\uFF1B'],  // Fullwidth semicolon
+        '&': ['＆', '\uFF06'],  // Fullwidth ampersand
+    };
+
+    for (const [ascii, variants] of Object.entries(unicodeVariants)) {
+        for (const variant of variants) {
+            if (command.includes(variant)) {
+                throw new Error(`Command contains Unicode variant of blocked operator: ${ascii}`);
+            }
+        }
     }
 }
 
@@ -88,6 +130,11 @@ export function parseCommand(fullCommand: string): { command: string; args: stri
         }
 
         current += char;
+    }
+
+    // Check for unclosed quotes - this is a security issue
+    if (inQuotes) {
+        throw new Error(`Unclosed ${quoteChar} quote in command`);
     }
 
     // Add any remaining token
@@ -146,11 +193,37 @@ export function parseCommand(fullCommand: string): { command: string; args: stri
     };
 }
 
+/**
+ * Safely canonicalize a path, resolving symlinks, junctions, and handling errors
+ */
+export function canonicalizePath(inputPath: string): string {
+    try {
+        // Use realpathSync to resolve all symbolic links, junctions, and relative paths
+        const realPath = require('fs').realpathSync(inputPath, { encoding: 'utf8' });
+        return path.normalize(realPath);
+    } catch (error) {
+        // If path doesn't exist or can't be resolved, normalize it anyway
+        // This allows checking against allowed paths even if directory doesn't exist yet
+        return path.normalize(path.resolve(inputPath));
+    }
+}
+
 export function isPathAllowed(testPath: string, allowedPaths: string[]): boolean {
-    const normalizedPath = path.normalize(testPath).toLowerCase();
+    // Canonicalize the test path to resolve symlinks, junctions, and relative paths
+    const canonicalPath = canonicalizePath(testPath).toLowerCase();
+
     return allowedPaths.some(allowedPath => {
-        const normalizedAllowedPath = path.normalize(allowedPath).toLowerCase();
-        return normalizedPath.startsWith(normalizedAllowedPath);
+        // Canonicalize each allowed path as well
+        const canonicalAllowedPath = canonicalizePath(allowedPath).toLowerCase();
+
+        // Ensure we're checking if the path is truly within the allowed directory
+        // Add path separator to prevent partial matches (e.g., C:\test vs C:\test2)
+        const normalizedAllowed = canonicalAllowedPath.endsWith(path.sep)
+            ? canonicalAllowedPath
+            : canonicalAllowedPath + path.sep;
+
+        return canonicalPath === canonicalAllowedPath ||
+               canonicalPath.startsWith(normalizedAllowed);
     });
 }
 

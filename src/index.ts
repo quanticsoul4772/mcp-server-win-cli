@@ -9,12 +9,14 @@ import {
   ErrorCode,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
-import { 
+import {
   isCommandBlocked,
   isArgumentBlocked,
   parseCommand,
   extractCommandName,
-  validateShellOperators
+  validateShellOperators,
+  canonicalizePath,
+  isPathAllowed
 } from './utils/validation.js';
 import { spawn } from 'child_process';
 import { z } from 'zod';
@@ -24,6 +26,7 @@ import type { ServerConfig, CommandHistoryEntry, SSHConnectionConfig } from './t
 import { SSHConnectionPool } from './utils/ssh.js';
 import { createRequire } from 'module';
 import { createSSHConnection, readSSHConnections, updateSSHConnection, deleteSSHConnection } from './utils/sshManager.js';
+import { sanitizeErrorMessage, createUserFriendlyError } from './utils/errorSanitizer.js';
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
 
@@ -53,6 +56,7 @@ class CLIServer {
   private commandHistory: CommandHistoryEntry[];
   private config: ServerConfig;
   private sshPool: SSHConnectionPool;
+  private historyCleanupTimer: NodeJS.Timeout | null = null;
 
   constructor(config: ServerConfig) {
     this.config = config;
@@ -73,6 +77,18 @@ class CLIServer {
     this.sshPool = new SSHConnectionPool();
 
     this.setupHandlers();
+    this.startHistoryCleanup();
+  }
+
+  private startHistoryCleanup(): void {
+    // Run cleanup every 5 minutes
+    this.historyCleanupTimer = setInterval(() => {
+      if (this.commandHistory.length > this.config.security.maxHistorySize) {
+        const excess = this.commandHistory.length - this.config.security.maxHistorySize;
+        this.commandHistory.splice(0, excess);
+        console.error(`Cleaned up ${excess} old command history entries`);
+      }
+    }, 5 * 60 * 1000);
   }
 
   private validateCommand(shell: keyof ServerConfig['shells'], command: string): void {
@@ -548,23 +564,22 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
             // Validate command
             this.validateCommand(args.shell as keyof ServerConfig['shells'], args.command);
 
-            // Validate working directory if provided
-            let workingDir = args.workingDir ? 
-              path.resolve(args.workingDir) : 
+            // Validate and canonicalize working directory if provided
+            let workingDir = args.workingDir ?
+              args.workingDir :
               process.cwd();
+
+            // Canonicalize the path to resolve symlinks, junctions, and relative paths
+            workingDir = canonicalizePath(workingDir);
 
             const shellKey = args.shell as keyof typeof this.config.shells;
             const shellConfig = this.config.shells[shellKey];
-            
-            if (this.config.security.restrictWorkingDirectory) {
-              const isAllowedPath = Array.from(this.allowedPaths).some(
-                allowedPath => workingDir.startsWith(allowedPath)
-              );
 
-              if (!isAllowedPath) {
+            if (this.config.security.restrictWorkingDirectory) {
+              if (!isPathAllowed(workingDir, Array.from(this.allowedPaths))) {
                 throw new McpError(
                   ErrorCode.InvalidRequest,
-                  `Working directory (${workingDir}) outside allowed paths. Consult the server admin for configuration changes (config.json - restrictWorkingDirectory, allowedPaths).`
+                  `Working directory outside allowed paths. Consult the server admin for configuration changes (config.json - restrictWorkingDirectory, allowedPaths).`
                 );
               }
             }
@@ -582,7 +597,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
               } catch (err) {
                 throw new McpError(
                   ErrorCode.InternalError,
-                  `Failed to start shell process: ${err instanceof Error ? err.message : String(err)}. Consult the server admin for configuration changes (config.json - shells).`
+                  `Failed to start shell process: ${createUserFriendlyError(err)}. Consult the server admin for configuration changes.`
                 );
               }
 
@@ -654,7 +669,8 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
 
               // Handle process errors (e.g., shell crashes)
               shellProcess.on('error', (err) => {
-                const errorMessage = `Shell process error: ${err.message}`;
+                const sanitizedError = createUserFriendlyError(err);
+                const errorMessage = `Shell process error: ${sanitizedError}`;
                 if (this.config.security.logCommands) {
                   this.commandHistory.push({
                     command: args.command,
@@ -746,10 +762,23 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
             }
 
             try {
-              // Validate command
-              this.validateCommand('cmd', args.command);
-
+              // Get or establish connection first
               const connection = await this.sshPool.getConnection(args.connectionId, connectionConfig);
+
+              // Detect the remote shell type and validate accordingly
+              const remoteShellType = await this.sshPool.getRemoteShellType(args.connectionId);
+
+              // Map remote shell type to local shell config for validation
+              let validationShell: keyof ServerConfig['shells'] = 'gitbash'; // Default to bash-like
+              if (remoteShellType === 'powershell') {
+                validationShell = 'powershell';
+              } else if (remoteShellType === 'cmd') {
+                validationShell = 'cmd';
+              }
+
+              // Validate command with appropriate shell context
+              this.validateCommand(validationShell, args.command);
+
               const { output, exitCode } = await connection.executeCommand(args.command);
 
               // Store in history if enabled
@@ -779,11 +808,11 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
                 }
               };
             } catch (error) {
-              const errorMessage = error instanceof Error ? error.message : String(error);
+              const sanitizedError = createUserFriendlyError(error);
               if (this.config.security.logCommands) {
                 this.commandHistory.push({
                   command: args.command,
-                  output: `SSH error: ${errorMessage}`,
+                  output: `SSH error: ${sanitizedError}`,
                   timestamp: new Date().toISOString(),
                   exitCode: -1,
                   connectionId: args.connectionId
@@ -791,7 +820,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
               }
               throw new McpError(
                 ErrorCode.InternalError,
-                `SSH error: ${errorMessage}`
+                `SSH error: ${sanitizedError}`
               );
             }
           }
@@ -828,7 +857,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
                 privateKeyPath: z.string().optional(),
               })
             }).parse(request.params.arguments);
-            createSSHConnection(args.connectionId, args.connectionConfig);
+            await createSSHConnection(args.connectionId, args.connectionConfig);
             return { content: [{ type: 'text', text: 'SSH connection created successfully.' }] };
           }
 
@@ -848,7 +877,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
                 privateKeyPath: z.string().optional(),
               })
             }).parse(request.params.arguments);
-            updateSSHConnection(args.connectionId, args.connectionConfig);
+            await updateSSHConnection(args.connectionId, args.connectionConfig);
             return { content: [{ type: 'text', text: 'SSH connection updated successfully.' }] };
           }
 
@@ -856,7 +885,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
             const args = z.object({
               connectionId: z.string(),
             }).parse(request.params.arguments);
-            deleteSSHConnection(args.connectionId);
+            await deleteSSHConnection(args.connectionId);
             return { content: [{ type: 'text', text: 'SSH connection deleted successfully.' }] };
           }
 
@@ -884,6 +913,13 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
   }
 
   private async cleanup(): Promise<void> {
+    // Clear history cleanup timer
+    if (this.historyCleanupTimer) {
+      clearInterval(this.historyCleanupTimer);
+      this.historyCleanupTimer = null;
+    }
+
+    // Close all SSH connections
     this.sshPool.closeAll();
   }
 

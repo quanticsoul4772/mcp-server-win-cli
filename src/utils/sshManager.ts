@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { ServerConfig } from '../types/config.js';
+import lockfile from 'proper-lockfile';
+import { ServerConfig, SSHConnectionConfig } from '../types/config.js';
 import { loadConfig as loadMainConfig } from './config.js';
+import { SSHConnectionConfigSchema } from '../types/schemas.js';
 
 /**
  * Load the current configuration from the config file.
@@ -17,29 +19,59 @@ const loadConfig = (): ServerConfig => {
 };
 
 /**
- * Save the updated configuration to the config file.
+ * Get the config file path from process arguments or default
+ */
+const getConfigPath = (): string => {
+  const args = process.argv.slice(2);
+  let configPath = './config.json';
+
+  // Try to find a config path in the arguments
+  for (let i = 0; i < args.length - 1; i++) {
+    if ((args[i] === '--config' || args[i] === '-c') && args[i + 1]) {
+      configPath = args[i + 1];
+      break;
+    }
+  }
+
+  return path.resolve(configPath);
+};
+
+/**
+ * Save the updated configuration to the config file with file locking.
  * @param config The updated configuration object.
  */
-const saveConfig = (config: ServerConfig): void => {
+const saveConfig = async (config: ServerConfig): Promise<void> => {
+  const resolvedPath = getConfigPath();
+  let release: (() => Promise<void>) | undefined;
+
   try {
-    // Use the actual config path from the process args or default
-    const args = process.argv.slice(2);
-    let configPath = './config.json';
-    
-    // Try to find a config path in the arguments
-    for (let i = 0; i < args.length - 1; i++) {
-      if ((args[i] === '--config' || args[i] === '-c') && args[i + 1]) {
-        configPath = args[i + 1];
-        break;
-      }
-    }
-    
-    // Resolve the path to be safe
-    const resolvedPath = path.resolve(configPath);
-    fs.writeFileSync(resolvedPath, JSON.stringify(config, null, 2));
+    // Acquire exclusive lock with retry logic
+    release = await lockfile.lock(resolvedPath, {
+      retries: {
+        retries: 5,
+        minTimeout: 100,
+        maxTimeout: 1000
+      },
+      stale: 5000 // Release stale locks after 5 seconds
+    });
+
+    // Write config atomically
+    const tempPath = `${resolvedPath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf8');
+    fs.renameSync(tempPath, resolvedPath);
+
   } catch (error) {
     console.error('Error saving configuration:', error);
     throw error;
+  } finally {
+    // Always release the lock
+    if (release) {
+      try {
+        await release();
+      } catch (unlockError) {
+        console.error('Error releasing config file lock:', unlockError);
+      }
+    }
   }
 };
 
@@ -48,17 +80,26 @@ const saveConfig = (config: ServerConfig): void => {
  * @param connectionId The ID for the new connection.
  * @param connectionConfig The configuration for the new connection.
  */
-const createSSHConnection = (connectionId: string, connectionConfig: any): void => {
+const createSSHConnection = async (connectionId: string, connectionConfig: SSHConnectionConfig): Promise<void> => {
+  // Validate connection config at runtime
+  const validatedConfig = SSHConnectionConfigSchema.parse(connectionConfig);
+
   const config = loadConfig();
-  config.ssh.connections[connectionId] = connectionConfig;
-  saveConfig(config);
+
+  // Check if connection ID already exists
+  if (config.ssh.connections[connectionId]) {
+    throw new Error(`SSH connection with ID '${connectionId}' already exists`);
+  }
+
+  config.ssh.connections[connectionId] = validatedConfig;
+  await saveConfig(config);
 };
 
 /**
  * Read all SSH connections.
  * @returns An object containing all SSH connections.
  */
-const readSSHConnections = (): object => {
+const readSSHConnections = (): Record<string, SSHConnectionConfig> => {
   const config = loadConfig();
   return config.ssh.connections;
 };
@@ -68,22 +109,33 @@ const readSSHConnections = (): object => {
  * @param connectionId The ID of the connection to update.
  * @param connectionConfig The new configuration for the connection.
  */
-const updateSSHConnection = (connectionId: string, connectionConfig: any): void => {
+const updateSSHConnection = async (connectionId: string, connectionConfig: SSHConnectionConfig): Promise<void> => {
+  // Validate connection config at runtime
+  const validatedConfig = SSHConnectionConfigSchema.parse(connectionConfig);
+
   const config = loadConfig();
-  if (config.ssh.connections[connectionId]) {
-    config.ssh.connections[connectionId] = connectionConfig;
-    saveConfig(config);
+
+  if (!config.ssh.connections[connectionId]) {
+    throw new Error(`SSH connection with ID '${connectionId}' does not exist`);
   }
+
+  config.ssh.connections[connectionId] = validatedConfig;
+  await saveConfig(config);
 };
 
 /**
  * Delete an SSH connection.
  * @param connectionId The ID of the connection to delete.
  */
-const deleteSSHConnection = (connectionId: string): void => {
+const deleteSSHConnection = async (connectionId: string): Promise<void> => {
   const config = loadConfig();
+
+  if (!config.ssh.connections[connectionId]) {
+    throw new Error(`SSH connection with ID '${connectionId}' does not exist`);
+  }
+
   delete config.ssh.connections[connectionId];
-  saveConfig(config);
+  await saveConfig(config);
 };
 
 export { createSSHConnection, readSSHConnections, updateSSHConnection, deleteSSHConnection }; 

@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { ServerConfig, ShellConfig } from '../types/config.js';
+import { secureDeepMerge } from './deepMerge.js';
+import { ServerConfigSchema } from '../types/schemas.js';
 
 const defaultValidatePathRegex = /^[a-zA-Z]:\\(?:[^<>:"/\\|?*]+\\)*[^<>:"/\\|?*]*$/;
 
@@ -100,35 +102,31 @@ export function loadConfig(configPath?: string): ServerConfig {
 }
 
 function mergeConfigs(defaultConfig: ServerConfig, userConfig: Partial<ServerConfig>): ServerConfig {
-  const merged: ServerConfig = {
-    security: {
-      // If user provided security config, use it entirely, otherwise use default
-      ...(userConfig.security || defaultConfig.security)
-    },
-    shells: {
-      // Same for each shell - if user provided config, use it entirely
-      powershell: userConfig.shells?.powershell || defaultConfig.shells.powershell,
-      cmd: userConfig.shells?.cmd || defaultConfig.shells.cmd,
-      gitbash: userConfig.shells?.gitbash || defaultConfig.shells.gitbash
-    },
-    ssh: {
-      // Merge SSH config
-      ...(defaultConfig.ssh),
-      ...(userConfig.ssh || {}),
-      // Ensure connections are merged
-      connections: {
-        ...(defaultConfig.ssh.connections),
-        ...(userConfig.ssh?.connections || {})
-      }
-    }
-  };
+  // Define security-critical keys that should use most restrictive values
+  const securityCriticalKeys = [
+    'security.maxCommandLength',
+    'security.restrictWorkingDirectory',
+    'security.logCommands',
+    'security.maxHistorySize',
+    'security.commandTimeout',
+    'security.enableInjectionProtection'
+  ];
 
-  // Only add validatePath functions and blocked operators if they don't exist
+  // Perform secure deep merge
+  const merged = secureDeepMerge(defaultConfig, userConfig, securityCriticalKeys);
+
+  // Ensure validatePath functions are preserved (they're functions, not serialized)
   for (const [key, shell] of Object.entries(merged.shells) as [keyof typeof merged.shells, ShellConfig][]) {
     if (!shell.validatePath) {
       shell.validatePath = defaultConfig.shells[key].validatePath;
     }
-    if (!shell.blockedOperators) {
+    // Ensure blocked operators are merged (union of both lists)
+    if (shell.blockedOperators && defaultConfig.shells[key].blockedOperators) {
+      shell.blockedOperators = [...new Set([
+        ...defaultConfig.shells[key].blockedOperators!,
+        ...shell.blockedOperators
+      ])];
+    } else if (!shell.blockedOperators) {
       shell.blockedOperators = defaultConfig.shells[key].blockedOperators;
     }
   }
@@ -137,50 +135,21 @@ function mergeConfigs(defaultConfig: ServerConfig, userConfig: Partial<ServerCon
 }
 
 function validateConfig(config: ServerConfig): void {
-  // Validate security settings
-  if (config.security.maxCommandLength < 1) {
-    throw new Error('maxCommandLength must be positive');
+  try {
+    // Use Zod schema for comprehensive runtime validation
+    ServerConfigSchema.parse(config);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Configuration validation failed: ${error.message}`);
+    }
+    throw error;
   }
 
-  if (config.security.maxHistorySize < 1) {
-    throw new Error('maxHistorySize must be positive');
-  }
-
+  // Additional custom validations not covered by Zod
   // Validate shell configurations
   for (const [shellName, shell] of Object.entries(config.shells)) {
     if (shell.enabled && (!shell.command || !shell.args)) {
       throw new Error(`Invalid configuration for ${shellName}: missing command or args`);
-    }
-  }
-
-  // Validate timeout (minimum 1 second)
-  if (config.security.commandTimeout < 1) {
-    throw new Error('commandTimeout must be at least 1 second');
-  }
-
-  // Validate SSH configuration
-  if (config.ssh.enabled) {
-    if (config.ssh.defaultTimeout < 1) {
-      throw new Error('SSH defaultTimeout must be at least 1 second');
-    }
-    if (config.ssh.maxConcurrentSessions < 1) {
-      throw new Error('SSH maxConcurrentSessions must be at least 1');
-    }
-    if (config.ssh.keepaliveInterval < 1000) {
-      throw new Error('SSH keepaliveInterval must be at least 1000ms');
-    }
-    if (config.ssh.readyTimeout < 1000) {
-      throw new Error('SSH readyTimeout must be at least 1000ms');
-    }
-
-    // Validate individual connections
-    for (const [connId, conn] of Object.entries(config.ssh.connections)) {
-      if (!conn.host || !conn.username || (!conn.password && !conn.privateKeyPath)) {
-        throw new Error(`Invalid SSH connection config for '${connId}': missing required fields`);
-      }
-      if (conn.port && (conn.port < 1 || conn.port > 65535)) {
-        throw new Error(`Invalid SSH port for '${connId}': must be between 1 and 65535`);
-      }
     }
   }
 }

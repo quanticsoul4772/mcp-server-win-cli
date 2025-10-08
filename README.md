@@ -1,14 +1,24 @@
 # Windows CLI MCP Server
 
-> [!CAUTION]
-> **PROJECT DEPRECATED** - No longer maintained.
-> Use https://github.com/wonderwhy-er/DesktopCommanderMCP instead for similar functionality.
+> [!NOTE]
+> **v0.3.0 - ACTIVE DEVELOPMENT** 🚀
+> This project has been revived with comprehensive security improvements and enhanced stability!
+> See [IMPROVEMENTS.md](IMPROVEMENTS.md) for full details on all enhancements.
 
 [![NPM Downloads](https://img.shields.io/npm/dt/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli)
 [![NPM Version](https://img.shields.io/npm/v/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli?activeTab=versions)
 [![smithery badge](https://smithery.ai/badge/@simonb97/server-win-cli)](https://smithery.ai/server/@simonb97/server-win-cli)
 
-[MCP server](https://modelcontextprotocol.io/introduction) for secure command-line interactions on Windows systems, enabling controlled access to PowerShell, CMD, Git Bash shells, and remote systems via SSH. It allows MCP clients (like [Claude Desktop](https://claude.ai/download)) to perform operations on your system, similar to [Open Interpreter](https://github.com/OpenInterpreter/open-interpreter).
+[MCP server](https://modelcontextprotocol.io/introduction) for **secure command-line interactions** on Windows systems, enabling controlled access to PowerShell, CMD, Git Bash shells, and remote systems via SSH. It allows MCP clients (like [Claude Desktop](https://claude.ai/download)) to perform operations on your system with enterprise-grade security.
+
+## ✨ What's New in v0.3.0
+
+- 🔒 **Enhanced Security**: Fixed critical vulnerabilities (path traversal, command injection, race conditions)
+- 🛡️ **Information Protection**: Error message sanitization prevents disclosure of internal paths
+- 🔄 **Smart SSH**: Auto-detection of remote shell types with proper validation
+- ⚡ **Resource Management**: Connection pool limits, automatic cleanup, exponential backoff
+- 🎯 **Improved Config**: Secure deep merge preserves security settings
+- 📝 **Better Logging**: Comprehensive audit trail with periodic cleanup
 
 >[!IMPORTANT]
 > This MCP server provides direct access to your system's command line interface and remote systems via SSH. When enabled, it grants access to your files, environment variables, command execution capabilities, and remote server management.

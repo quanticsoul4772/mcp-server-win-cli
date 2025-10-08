@@ -8,7 +8,9 @@ import {
   isPathAllowed,
   validateWorkingDirectory,
   normalizeWindowsPath,
-  validateShellOperators
+  validateShellOperators,
+  containsDangerousCharacters,
+  canonicalizePath
 } from '../src/utils/validation.js';
 import type { ShellConfig } from '../src/types/config.js';
 
@@ -188,5 +190,78 @@ describe('Shell Operator Validation', () => {
       .not.toThrow();
     expect(() => validateShellOperators('cmd | echo test', customConfig))
       .toThrow();
+  });
+});
+
+// v0.3.0 Security Enhancement Tests
+describe('Dangerous Character Detection (v0.3.0)', () => {
+  test('containsDangerousCharacters detects null bytes', () => {
+    expect(containsDangerousCharacters('test\x00command')).toBe(true);
+  });
+
+  test('containsDangerousCharacters detects control characters', () => {
+    expect(containsDangerousCharacters('test\x01command')).toBe(true);
+    expect(containsDangerousCharacters('test\x08command')).toBe(true);
+  });
+
+  test('containsDangerousCharacters allows normal text', () => {
+    expect(containsDangerousCharacters('normal command')).toBe(false);
+    expect(containsDangerousCharacters('command with spaces')).toBe(false);
+  });
+
+  test('containsDangerousCharacters allows tabs and newlines', () => {
+    expect(containsDangerousCharacters('command\ttab')).toBe(false);
+    expect(containsDangerousCharacters('command\nnewline')).toBe(false);
+  });
+});
+
+describe('Quote Validation (v0.3.0)', () => {
+  test('parseCommand throws on unclosed double quotes', () => {
+    expect(() => parseCommand('"unclosed')).toThrow('Unclosed " quote');
+  });
+
+  test('parseCommand throws on unclosed single quotes', () => {
+    expect(() => parseCommand("'unclosed")).toThrow("Unclosed ' quote");
+  });
+
+  test('parseCommand handles properly closed quotes', () => {
+    expect(() => parseCommand('"closed"')).not.toThrow();
+    expect(() => parseCommand("'closed'")).not.toThrow();
+  });
+});
+
+describe('Path Canonicalization (v0.3.0)', () => {
+  test('canonicalizePath normalizes paths', () => {
+    const result = canonicalizePath('C:\\test\\..\\final');
+    expect(result).toContain('C:');
+  });
+
+  test('canonicalizePath handles non-existent paths', () => {
+    const result = canonicalizePath('C:\\nonexistent\\path');
+    expect(result).toContain('C:');
+  });
+});
+
+describe('Enhanced Security Validation (v0.3.0)', () => {
+  const shellConfig: ShellConfig = {
+    enabled: true,
+    command: 'cmd.exe',
+    args: ['/c'],
+    blockedOperators: ['&', '|', ';', '`', '>', '<']
+  };
+
+  test('blocks redirection operators', () => {
+    expect(() => validateShellOperators('echo test > file.txt', shellConfig)).toThrow();
+    expect(() => validateShellOperators('cat < input.txt', shellConfig)).toThrow();
+    expect(() => validateShellOperators('echo test >> file.txt', shellConfig)).toThrow();
+  });
+
+  test('blocks Unicode operator variants', () => {
+    expect(() => validateShellOperators('cmd ｜ echo', shellConfig)).toThrow('Unicode variant');
+    expect(() => validateShellOperators('cmd ； echo', shellConfig)).toThrow('Unicode variant');
+  });
+
+  test('blocks control characters', () => {
+    expect(() => validateShellOperators('cmd\x00test', shellConfig)).toThrow('control characters');
   });
 });
