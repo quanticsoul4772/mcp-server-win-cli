@@ -1,0 +1,18 @@
+# Exclude generated/compiled files from GitHub language statistics
+dist/** linguist-generated=true
+
+# Mark vendored files
+node_modules/** linguist-vendored=true
+
+# Ensure proper line endings
+*.ts text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Mark documentation
+*.md linguist-documentation=true
+README.md linguist-documentation=false
+
+# Mark configuration files as vendored/generated
+jest.config.js linguist-vendored=true

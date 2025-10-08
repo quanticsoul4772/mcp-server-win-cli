@@ -326,6 +326,10 @@ export class SSHConnectionPool {
     return connection.getShellType();
   }
 
+  hasConnection(connectionId: string): boolean {
+    return this.connections.has(connectionId);
+  }
+
   async closeConnection(connectionId: string): Promise<void> {
     const connection = this.connections.get(connectionId);
     if (connection) {

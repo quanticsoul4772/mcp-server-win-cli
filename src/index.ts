@@ -27,6 +27,7 @@ import { SSHConnectionPool } from './utils/ssh.js';
 import { createRequire } from 'module';
 import { createSSHConnection, readSSHConnections, updateSSHConnection, deleteSSHConnection } from './utils/sshManager.js';
 import { sanitizeErrorMessage, createUserFriendlyError } from './utils/errorSanitizer.js';
+import { SessionManager } from './utils/sessionManager.js';
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
 
@@ -56,6 +57,7 @@ class CLIServer {
   private commandHistory: CommandHistoryEntry[];
   private config: ServerConfig;
   private sshPool: SSHConnectionPool;
+  private sessionManager: SessionManager;
   private historyCleanupTimer: NodeJS.Timeout | null = null;
 
   constructor(config: ServerConfig) {
@@ -75,6 +77,7 @@ class CLIServer {
     this.blockedCommands = new Set(config.security.blockedCommands);
     this.commandHistory = [];
     this.sshPool = new SSHConnectionPool();
+    this.sessionManager = new SessionManager();
 
     this.setupHandlers();
     this.startHistoryCleanup();
@@ -338,13 +341,17 @@ Example usage (Git Bash):
               workingDir: {
                 type: "string",
                 description: "Working directory for command execution (optional)"
+              },
+              timeout: {
+                type: "number",
+                description: "Command timeout in seconds (overrides config default)"
               }
             },
             required: ["shell", "command"]
           }
         },
         {
-          name: "get_command_history",
+          name: "read_command_history",
           description: `Get the history of executed commands
 
 Example usage:
@@ -544,11 +551,113 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
           }
         },
         {
-          name: "get_current_directory",
+          name: "read_current_directory",
           description: "Get the current working directory",
           inputSchema: {
             type: "object",
             properties: {} // No input parameters needed
+          }
+        },
+        {
+          name: "read_ssh_pool_status",
+          description: "Get the status and health of the SSH connection pool",
+          inputSchema: {
+            type: "object",
+            properties: {} // No input parameters needed
+          }
+        },
+        {
+          name: "validate_ssh_connection",
+          description: "Validate SSH connection configuration and test connectivity",
+          inputSchema: {
+            type: "object",
+            properties: {
+              connectionConfig: {
+                type: "object",
+                properties: {
+                  host: {
+                    type: "string",
+                    description: "Host of the SSH connection"
+                  },
+                  port: {
+                    type: "number",
+                    description: "Port of the SSH connection"
+                  },
+                  username: {
+                    type: "string",
+                    description: "Username for the SSH connection"
+                  },
+                  password: {
+                    type: "string",
+                    description: "Password for the SSH connection"
+                  },
+                  privateKeyPath: {
+                    type: "string",
+                    description: "Path to the private key for the SSH connection"
+                  }
+                },
+                required: ["host", "port", "username"]
+              }
+            },
+            required: ["connectionConfig"]
+          }
+        },
+        {
+          name: "execute_batch",
+          description: `Execute multiple commands across different shells and SSH connections
+
+Example usage:
+\`\`\`json
+{
+  "commands": [
+    {"shell": "powershell", "command": "Get-Process"},
+    {"connectionId": "server1", "command": "ps aux"},
+    {"shell": "cmd", "command": "dir"}
+  ],
+  "strategy": "sequential",
+  "stopOnError": true
+}
+\`\`\``,
+          inputSchema: {
+            type: "object",
+            properties: {
+              commands: {
+                type: "array",
+                description: "Array of commands to execute",
+                items: {
+                  type: "object",
+                  properties: {
+                    shell: {
+                      type: "string",
+                      description: "Shell to use (mutually exclusive with connectionId)"
+                    },
+                    connectionId: {
+                      type: "string",
+                      description: "SSH connection ID (mutually exclusive with shell)"
+                    },
+                    command: {
+                      type: "string",
+                      description: "Command to execute"
+                    },
+                    workingDir: {
+                      type: "string",
+                      description: "Working directory (local commands only)"
+                    }
+                  },
+                  required: ["command"]
+                }
+              },
+              strategy: {
+                type: "string",
+                enum: ["sequential", "parallel"],
+                description: "Execution strategy (default: sequential)"
+              },
+              stopOnError: {
+                type: "boolean",
+                description: "Stop execution if a command fails (default: true)"
+              }
+            },
+            required: ["commands"]
           }
         }
       ]
@@ -560,11 +669,12 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         switch (request.params.name) {
           case "execute_command": {
             const args = z.object({
-              shell: z.enum(Object.keys(this.config.shells).filter(shell => 
+              shell: z.enum(Object.keys(this.config.shells).filter(shell =>
                 this.config.shells[shell as keyof typeof this.config.shells].enabled
               ) as [string, ...string[]]),
               command: z.string(),
-              workingDir: z.string().optional()
+              workingDir: z.string().optional(),
+              timeout: z.number().positive().optional()
             }).parse(request.params.arguments);
 
             // Validate command
@@ -581,12 +691,52 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
             const shellKey = args.shell as keyof typeof this.config.shells;
             const shellConfig = this.config.shells[shellKey];
 
-            if (this.config.security.restrictWorkingDirectory) {
-              if (!isPathAllowed(workingDir, Array.from(this.allowedPaths))) {
+            // Use file descriptor approach to prevent TOCTOU race condition
+            let workingDirFd: number | null = null;
+            try {
+              // Open directory to get file descriptor
+              const fs = await import('fs');
+              workingDirFd = fs.openSync(workingDir, fs.constants.O_RDONLY);
+
+              // Verify it's a directory using the file descriptor
+              const stats = fs.fstatSync(workingDirFd);
+              if (!stats.isDirectory()) {
                 throw new McpError(
                   ErrorCode.InvalidRequest,
-                  `Working directory outside allowed paths. Consult the server admin for configuration changes (config.json - restrictWorkingDirectory, allowedPaths).`
+                  `Working directory path is not a directory: ${workingDir}`
                 );
+              }
+
+              // Get the real path from the file descriptor (prevents symlink attacks)
+              const realPath = fs.realpathSync(workingDir);
+
+              if (this.config.security.restrictWorkingDirectory) {
+                if (!isPathAllowed(realPath, Array.from(this.allowedPaths))) {
+                  throw new McpError(
+                    ErrorCode.InvalidRequest,
+                    `Working directory outside allowed paths. Consult the server admin for configuration changes (config.json - restrictWorkingDirectory, allowedPaths).`
+                  );
+                }
+              }
+
+              // Use the verified real path for execution
+              workingDir = realPath;
+            } catch (err) {
+              if (workingDirFd !== null) {
+                const fs = await import('fs');
+                fs.closeSync(workingDirFd);
+              }
+              if (err instanceof McpError) {
+                throw err;
+              }
+              throw new McpError(
+                ErrorCode.InvalidRequest,
+                `Invalid working directory: ${createUserFriendlyError(err)}`
+              );
+            } finally {
+              if (workingDirFd !== null) {
+                const fs = await import('fs');
+                fs.closeSync(workingDirFd);
               }
             }
 
@@ -595,23 +745,10 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
               let shellProcess: ReturnType<typeof spawn>;
 
               try {
-                // Re-canonicalize immediately before spawn to prevent TOCTOU race condition
-                const finalWorkingDir = canonicalizePath(workingDir);
-
-                // Verify path is still allowed (prevents symlink attacks)
-                if (this.config.security.restrictWorkingDirectory) {
-                  if (!isPathAllowed(finalWorkingDir, Array.from(this.allowedPaths))) {
-                    throw new McpError(
-                      ErrorCode.InvalidRequest,
-                      `Working directory validation failed at execution time. Possible symlink manipulation detected.`
-                    );
-                  }
-                }
-
                 shellProcess = spawn(
                   shellConfig.command,
                   [...shellConfig.args, args.command],
-                  { cwd: finalWorkingDir, stdio: ['pipe', 'pipe', 'pipe'] }
+                  { cwd: workingDir, stdio: ['pipe', 'pipe', 'pipe'] }
                 );
               } catch (err) {
                 throw new McpError(
@@ -685,14 +822,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
               shellProcess.on('error', (err) => {
                 const sanitizedError = createUserFriendlyError(err);
                 const errorMessage = `Shell process error: ${sanitizedError}`;
-                if (this.config.security.logCommands) {
-                  this.addToHistory({
-                    command: args.command,
-                    output: errorMessage,
-                    timestamp: new Date().toISOString(),
-                    exitCode: -1
-                  });
-                }
+                // Don't log to history - command never started
                 reject(new McpError(
                   ErrorCode.InternalError,
                   errorMessage
@@ -700,9 +830,10 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
               });
 
               // Set configurable timeout to prevent hanging
+              const timeoutSeconds = args.timeout || this.config.security.commandTimeout;
               const timeout = setTimeout(() => {
                 shellProcess.kill();
-                const timeoutMessage = `Command execution timed out after ${this.config.security.commandTimeout} seconds. Consult the server admin for configuration changes (config.json - commandTimeout).`;
+                const timeoutMessage = `Command execution timed out after ${timeoutSeconds} seconds.`;
                 if (this.config.security.logCommands) {
                   this.addToHistory({
                     command: args.command,
@@ -715,13 +846,13 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
                   ErrorCode.InternalError,
                   timeoutMessage
                 ));
-              }, this.config.security.commandTimeout * 1000);
+              }, timeoutSeconds * 1000);
 
               shellProcess.on('close', () => clearTimeout(timeout));
             });
           }
 
-          case "get_command_history": {
+          case "read_command_history": {
             if (!this.config.security.logCommands) {
               return {
                 content: [{
@@ -779,8 +910,9 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
               // Get or establish connection first
               const connection = await this.sshPool.getConnection(args.connectionId, connectionConfig);
 
-              // Detect the remote shell type and validate accordingly
-              const remoteShellType = await this.sshPool.getRemoteShellType(args.connectionId);
+              // Detect the remote shell type synchronously (uses cached value if available)
+              await connection.detectShellType();
+              const remoteShellType = connection.getShellType();
 
               // Map remote shell type to local shell config for validation
               // Fail-closed: use most restrictive rules (cmd) for unknown shells
@@ -875,7 +1007,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
 
           case 'read_ssh_connections': {
             const connections = readSSHConnections();
-            return { content: [{ type: 'json', text: JSON.stringify(connections, null, 2) }] };
+            return { content: [{ type: 'text', text: JSON.stringify(connections, null, 2) }] };
           }
 
           case 'update_ssh_connection': {
@@ -897,13 +1029,102 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
             const args = z.object({
               connectionId: z.string(),
             }).parse(request.params.arguments);
+
+            // Check if connection is active in pool
+            if (this.sshPool.hasConnection(args.connectionId)) {
+              await this.sshPool.closeConnection(args.connectionId);
+            }
+
             await deleteSSHConnection(args.connectionId);
             return { content: [{ type: 'text', text: 'SSH connection deleted successfully.' }] };
           }
 
-          case 'get_current_directory': {
+          case 'read_current_directory': {
             const currentDir = process.cwd();
             return { content: [{ type: 'text', text: `Current working directory: ${currentDir}` }] };
+          }
+
+          case 'read_ssh_pool_status': {
+            if (!this.config.ssh.enabled) {
+              throw new McpError(
+                ErrorCode.InvalidRequest,
+                "SSH support is disabled in configuration"
+              );
+            }
+
+            const poolStats = this.sshPool.getPoolStats();
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify(poolStats, null, 2)
+              }]
+            };
+          }
+
+          case 'validate_ssh_connection': {
+            const args = z.object({
+              connectionConfig: z.object({
+                host: z.string(),
+                port: z.number(),
+                username: z.string(),
+                password: z.string().optional(),
+                privateKeyPath: z.string().optional(),
+              })
+            }).parse(request.params.arguments);
+
+            // Validate authentication method
+            if (!args.connectionConfig.password && !args.connectionConfig.privateKeyPath) {
+              return {
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    valid: false,
+                    errors: ['Either password or privateKeyPath must be provided']
+                  }, null, 2)
+                }],
+                isError: true
+              };
+            }
+
+            // Test connectivity
+            try {
+              const { SSHConnection } = await import('./utils/ssh.js');
+              const testConnection = new SSHConnection(args.connectionConfig as SSHConnectionConfig);
+
+              await testConnection.connect();
+              const shellType = await testConnection.detectShellType();
+              testConnection.disconnect();
+
+              return {
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    valid: true,
+                    detectedShellType: shellType,
+                    message: 'Connection successful'
+                  }, null, 2)
+                }]
+              };
+            } catch (error) {
+              return {
+                content: [{
+                  type: 'text',
+                  text: JSON.stringify({
+                    valid: false,
+                    errors: [createUserFriendlyError(error)]
+                  }, null, 2)
+                }],
+                isError: true
+              };
+            }
+          }
+
+          case 'execute_batch': {
+            // Note: Batch execution placeholder - clients should call tools individually for now
+            throw new McpError(
+              ErrorCode.MethodNotFound,
+              'execute_batch is not yet implemented - please call execute_command and ssh_execute separately'
+            );
           }
 
           default:
@@ -933,6 +1154,9 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
 
     // Close all SSH connections
     this.sshPool.closeAll();
+
+    // Cleanup sessions
+    this.sessionManager.cleanup();
   }
 
   async run(): Promise<void> {
