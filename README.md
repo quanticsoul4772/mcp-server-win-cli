@@ -1,7 +1,11 @@
 # Windows CLI MCP Server
 
 > [!NOTE]
-> v0.3.0 - Active development. This project has been revived with security improvements and enhanced stability.
+> This is a fork of the original [win-cli-mcp-server](https://github.com/SimonB97/win-cli-mcp-server) by Simon Benedict.
+> This fork includes additional security fixes, API improvements, and new tools for enhanced functionality.
+
+> [!NOTE]
+> v0.3.0 - Active development with security improvements and enhanced stability.
 
 [![NPM Downloads](https://img.shields.io/npm/dt/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli)
 [![NPM Version](https://img.shields.io/npm/v/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli?activeTab=versions)
@@ -159,8 +163,7 @@ Note: The default configuration is designed to be restrictive and secure. Find m
     "restrictWorkingDirectory": true,
     "logCommands": true,
     "maxHistorySize": 1000,
-    "commandTimeout": 30,
-    "enableInjectionProtection": true
+    "commandTimeout": 30
   },
   "shells": {
     "powershell": {
@@ -252,10 +255,7 @@ The configuration file is divided into three main sections: `security`, `shells`
     "maxHistorySize": 1000,
 
     // Timeout for command execution in seconds (default: 30)
-    "commandTimeout": 30,
-
-    // Enable or disable protection against command injection (covers ;, &, |, \`)
-    "enableInjectionProtection": true
+    "commandTimeout": 30
   }
 }
 ```
@@ -353,9 +353,10 @@ The configuration file is divided into three main sections: `security`, `shells`
     - `shell` (string): Shell to use ("powershell", "cmd", or "gitbash")
     - `command` (string): Command to execute
     - `workingDir` (optional string): Working directory
+    - `timeout` (optional number): Command timeout in seconds (overrides config default)
   - Returns command output as text, or error message if execution fails
 
-- **get_command_history**
+- **read_command_history**
 
   - Get the history of executed commands
   - Input: `limit` (optional number)
@@ -399,9 +400,19 @@ The configuration file is divided into three main sections: `security`, `shells`
     - `connectionId` (string): ID of the SSH connection to delete
   - Returns confirmation message
 
-- **get_current_directory**
+- **read_current_directory**
   - Get the current working directory of the server
   - Returns the current working directory path
+
+- **read_ssh_pool_status**
+  - Get the status and health of the SSH connection pool
+  - Returns active connections, pool statistics, and connection IDs
+
+- **validate_ssh_connection**
+  - Validate SSH connection configuration and test connectivity
+  - Input:
+    - `connectionConfig` (object): Connection configuration to validate (host, port, username, password or privateKeyPath)
+  - Returns validation result with detected shell type if successful
 
 ### Resources
 

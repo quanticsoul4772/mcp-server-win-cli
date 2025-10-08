@@ -11,13 +11,13 @@
   ],
   "license": "MIT",
   "author": "Simon Benedict",
-  "homepage": "https://github.com/SimonB97/win-cli-mcp-server",
+  "homepage": "https://github.com/quanticsoul4772/win-cli-mcp-server",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SimonB97/win-cli-mcp-server.git"
+    "url": "git+https://github.com/quanticsoul4772/win-cli-mcp-server.git"
   },
   "bugs": {
-    "url": "https://github.com/SimonB97/win-cli-mcp-server/issues"
+    "url": "https://github.com/quanticsoul4772/win-cli-mcp-server/issues"
   },
   "keywords": [
     "mcp",
