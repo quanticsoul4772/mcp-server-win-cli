@@ -91,6 +91,14 @@ class CLIServer {
     }, 5 * 60 * 1000);
   }
 
+  private addToHistory(entry: CommandHistoryEntry): void {
+    // Clean up immediately if at limit (prevents memory spikes)
+    if (this.commandHistory.length >= this.config.security.maxHistorySize) {
+      this.commandHistory.shift(); // Remove oldest entry
+    }
+    this.commandHistory.push(entry);
+  }
+
   private validateCommand(shell: keyof ServerConfig['shells'], command: string): void {
     // Check for command chaining/injection attempts if enabled
     if (this.config.security.enableInjectionProtection) {
@@ -653,17 +661,12 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
 
                 // Store in history if enabled
                 if (this.config.security.logCommands) {
-                  this.commandHistory.push({
+                  this.addToHistory({
                     command: args.command,
                     output: resultMessage,
                     timestamp: new Date().toISOString(),
                     exitCode: code ?? -1
                   });
-
-                  // Trim history if needed
-                  if (this.commandHistory.length > this.config.security.maxHistorySize) {
-                    this.commandHistory = this.commandHistory.slice(-this.config.security.maxHistorySize);
-                  }
                 }
 
                 resolve({
@@ -685,7 +688,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
                 const sanitizedError = createUserFriendlyError(err);
                 const errorMessage = `Shell process error: ${sanitizedError}`;
                 if (this.config.security.logCommands) {
-                  this.commandHistory.push({
+                  this.addToHistory({
                     command: args.command,
                     output: errorMessage,
                     timestamp: new Date().toISOString(),
@@ -703,7 +706,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
                 shellProcess.kill();
                 const timeoutMessage = `Command execution timed out after ${this.config.security.commandTimeout} seconds. Consult the server admin for configuration changes (config.json - commandTimeout).`;
                 if (this.config.security.logCommands) {
-                  this.commandHistory.push({
+                  this.addToHistory({
                     command: args.command,
                     output: timeoutMessage,
                     timestamp: new Date().toISOString(),
@@ -798,17 +801,13 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
 
               // Store in history if enabled
               if (this.config.security.logCommands) {
-                this.commandHistory.push({
+                this.addToHistory({
                   command: args.command,
                   output,
                   timestamp: new Date().toISOString(),
                   exitCode,
                   connectionId: args.connectionId
                 });
-
-                if (this.commandHistory.length > this.config.security.maxHistorySize) {
-                  this.commandHistory = this.commandHistory.slice(-this.config.security.maxHistorySize);
-                }
               }
 
               return {
@@ -825,7 +824,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
             } catch (error) {
               const sanitizedError = createUserFriendlyError(error);
               if (this.config.security.logCommands) {
-                this.commandHistory.push({
+                this.addToHistory({
                   command: args.command,
                   output: `SSH error: ${sanitizedError}`,
                   timestamp: new Date().toISOString(),
