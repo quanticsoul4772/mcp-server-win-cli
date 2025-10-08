@@ -2,7 +2,6 @@
 
 > [!NOTE]
 > v0.3.0 - Active development. This project has been revived with security improvements and enhanced stability.
-> See [IMPROVEMENTS.md](IMPROVEMENTS.md) for details.
 
 [![NPM Downloads](https://img.shields.io/npm/dt/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli)
 [![NPM Version](https://img.shields.io/npm/v/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli?activeTab=versions)
