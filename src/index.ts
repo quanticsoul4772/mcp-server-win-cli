@@ -30,7 +30,7 @@ import type { ServerConfig, CommandHistoryEntry, SSHConnectionConfig } from './t
 import { SSHConnectionPool } from './utils/ssh.js';
 import { createRequire } from 'module';
 import { createSSHConnection, readSSHConnections, updateSSHConnection, deleteSSHConnection } from './utils/sshManager.js';
-import { sanitizeErrorMessage, createUserFriendlyError } from './utils/errorSanitizer.js';
+import { sanitizeErrorMessage, createUserFriendlyError, sanitizePathError, sanitizeConfigPath } from './utils/errorSanitizer.js';
 import { SessionManager } from './utils/sessionManager.js';
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
@@ -750,7 +750,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
               if (!stats.isDirectory()) {
                 throw new McpError(
                   ErrorCode.InvalidRequest,
-                  `Working directory path is not a directory: ${workingDir}`
+                  `Working directory path is not a directory: ${sanitizePathError(workingDir, args.workingDir)}`
                 );
               }
 
@@ -759,23 +759,23 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
 
               if (this.config.security.restrictWorkingDirectory) {
                 if (!isPathAllowed(realPath, Array.from(this.allowedPaths))) {
-                  const allowedList = Array.from(this.allowedPaths).map(p => `\n   - ${p}`).join('');
                   const configLocationMsg = getConfigLocationMessage(this.configPath);
 
                   throw new McpError(
                     ErrorCode.InvalidRequest,
                     formatEnhancedError({
-                      what: `Working directory '${realPath}' is not in allowed paths.`,
+                      what: `Working directory is not in allowed paths.`,
                       why: 'Path restrictions prevent commands from executing in untrusted directories. This protects against directory traversal attacks and limits the scope of potential damage.',
                       howToFix: [
                         configLocationMsg,
-                        `Add '${realPath}' to the "security.allowedPaths" array`,
+                        `Add the working directory to the "security.allowedPaths" array`,
                         'Note: The config uses secure merge - paths must exist in BOTH default and user config',
                         'Alternative: Set "security.restrictWorkingDirectory" to false (NOT recommended)',
+                        'Use the check_security_config tool with category="paths" to view allowed directories',
                         'Restart the MCP server'
                       ],
                       warning: 'Adding broad paths (like C:\\) weakens security. Only add specific directories you need to access.',
-                      tip: `Current allowed paths:${allowedList}\n\nUse absolute paths. The secure merge uses intersection, so new paths must overlap with defaults (current working directory or home directory).`,
+                      tip: 'Use the check_security_config tool to view current allowed paths. The secure merge uses intersection, so new paths must overlap with defaults (current working directory or home directory).',
                       configPath: this.configPath
                     })
                   );
@@ -876,7 +876,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
                   metadata: {
                     exitCode: code ?? -1,
                     shell: args.shell,
-                    workingDirectory: workingDir
+                    workingDirectory: sanitizePathError(workingDir, args.workingDir)
                   }
                 });
               });
@@ -1217,7 +1217,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
                   if (!isPathAllowed(realPath, Array.from(this.allowedPaths))) {
                     result.valid = false;
                     result.checks.path_allowed = false;
-                    result.errors.push(`Working directory '${realPath}' is not in allowed paths`);
+                    result.errors.push('Working directory is not in allowed paths. Use check_security_config tool with category="paths" to view allowed directories.');
                   }
                 }
               } catch (err) {

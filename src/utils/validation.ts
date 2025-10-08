@@ -3,6 +3,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
 import type { ShellConfig } from '../types/config.js';
+import { sanitizeConfigPath } from './errorSanitizer.js';
 const execAsync = promisify(exec);
 
 /**
@@ -57,12 +58,15 @@ export function formatEnhancedError(options: EnhancedErrorOptions): string {
  */
 export function getConfigLocationMessage(configPath: string | null): string {
   if (configPath) {
-    return `Edit your config file: ${configPath}`;
+    return `Edit your config file: ${sanitizeConfigPath(configPath)}`;
   }
 
+  // Sanitize default locations to avoid exposing usernames
+  const homeDir = os.homedir();
+  const username = path.basename(homeDir);
   const defaultLocations = [
-    path.join(process.cwd(), 'config.json'),
-    path.join(os.homedir(), '.win-cli-mcp', 'config.json')
+    'config.json (in current working directory)',
+    '~/.win-cli-mcp/config.json (in home directory)'
   ];
 
   return `Create a config file at one of these locations:\n   - ${defaultLocations.join('\n   - ')}`;
@@ -138,11 +142,205 @@ export function containsDangerousCharacters(command: string): boolean {
 }
 
 /**
+ * Normalize Unicode text using NFC (Canonical Decomposition, followed by Canonical Composition)
+ * This prevents attacks using composed vs decomposed characters
+ * @param text - Text to normalize
+ * @returns NFC-normalized text
+ */
+export function normalizeUnicode(text: string): string {
+    return text.normalize('NFC');
+}
+
+/**
+ * Detect PowerShell Unicode quotes that are interpreted as string delimiters
+ * Reference: https://blog.stmcyber.com/powershell-unicode-quotes-and-command-injection/
+ * @param command - Command to check
+ * @returns Object with detected status and character if found
+ */
+export function detectPowerShellUnicodeQuotes(command: string): { detected: boolean; char?: string; codepoint?: string } {
+    const powershellQuotes = new Map([
+        ['\u201C', 'U+201C (LEFT DOUBLE QUOTATION MARK)'],    // "
+        ['\u201D', 'U+201D (RIGHT DOUBLE QUOTATION MARK)'],   // "
+        ['\u2018', 'U+2018 (LEFT SINGLE QUOTATION MARK)'],    // '
+        ['\u2019', 'U+2019 (RIGHT SINGLE QUOTATION MARK)'],   // '
+        ['\u2033', 'U+2033 (DOUBLE PRIME)'],                  // ″
+        ['\u2032', 'U+2032 (PRIME)'],                         // ′
+    ]);
+
+    for (const [char, description] of powershellQuotes) {
+        if (command.includes(char)) {
+            return { detected: true, char, codepoint: description };
+        }
+    }
+
+    return { detected: false };
+}
+
+/**
+ * Detect Bidirectional (BiDi) text override control characters
+ * These can hide malicious code in logs and source code
+ * Reference: CVE-2021-42574 "Trojan Source"
+ * @param command - Command to check
+ * @returns Object with detected status and character if found
+ */
+export function detectBidiControlCharacters(command: string): { detected: boolean; char?: string; codepoint?: string } {
+    const bidiControls = new Map([
+        ['\u202E', 'U+202E (RIGHT-TO-LEFT OVERRIDE - RLO)'],
+        ['\u202D', 'U+202D (LEFT-TO-RIGHT OVERRIDE - LRO)'],
+        ['\u202A', 'U+202A (LEFT-TO-RIGHT EMBEDDING - LRE)'],
+        ['\u202B', 'U+202B (RIGHT-TO-LEFT EMBEDDING - RLE)'],
+        ['\u202C', 'U+202C (POP DIRECTIONAL FORMATTING - PDF)'],
+        ['\u2066', 'U+2066 (LEFT-TO-RIGHT ISOLATE - LRI)'],
+        ['\u2067', 'U+2067 (RIGHT-TO-LEFT ISOLATE - RLI)'],
+        ['\u2068', 'U+2068 (FIRST STRONG ISOLATE - FSI)'],
+        ['\u2069', 'U+2069 (POP DIRECTIONAL ISOLATE - PDI)'],
+    ]);
+
+    for (const [char, description] of bidiControls) {
+        if (command.includes(char)) {
+            return { detected: true, char, codepoint: description };
+        }
+    }
+
+    return { detected: false };
+}
+
+/**
+ * Detect combining characters that could hide operators or commands
+ * Reference: UTS #39 Unicode Security Mechanisms
+ * @param command - Command to check
+ * @returns Object with detected status and position if found
+ */
+export function detectSuspiciousCombiningCharacters(command: string): { detected: boolean; position?: number; char?: string } {
+    // Combining Diacritical Marks (U+0300-U+036F)
+    // Combining Marks for Symbols (U+20D0-U+20FF)
+    // These can be used to hide or modify the appearance of operators
+    const combiningMarksRegex = /[\u0300-\u036F\u20D0-\u20FF]/;
+
+    const match = command.match(combiningMarksRegex);
+    if (match && match.index !== undefined) {
+        return {
+            detected: true,
+            position: match.index,
+            char: match[0]
+        };
+    }
+
+    return { detected: false };
+}
+
+/**
+ * Detect additional invisible or misleading Unicode characters
+ * @param command - Command to check
+ * @returns Object with detected status and character if found
+ */
+export function detectInvisibleUnicodeCharacters(command: string): { detected: boolean; char?: string; codepoint?: string } {
+    const invisibleChars = new Map([
+        // Variation Selectors (can change appearance of preceding character)
+        ['\uFE00', 'U+FE00 (VARIATION SELECTOR-1)'],
+        ['\uFE01', 'U+FE01 (VARIATION SELECTOR-2)'],
+        ['\uFE0E', 'U+FE0E (VARIATION SELECTOR-15 - Text Style)'],
+        ['\uFE0F', 'U+FE0F (VARIATION SELECTOR-16 - Emoji Style)'],
+        // Other invisible separators
+        ['\u2060', 'U+2060 (WORD JOINER)'],
+        ['\u2062', 'U+2062 (INVISIBLE TIMES)'],
+        ['\u2063', 'U+2063 (INVISIBLE SEPARATOR)'],
+        ['\u2064', 'U+2064 (INVISIBLE PLUS)'],
+        ['\u206A', 'U+206A (INHIBIT SYMMETRIC SWAPPING)'],
+        ['\u206B', 'U+206B (ACTIVATE SYMMETRIC SWAPPING)'],
+        ['\u206C', 'U+206C (INHIBIT ARABIC FORM SHAPING)'],
+        ['\u206D', 'U+206D (ACTIVATE ARABIC FORM SHAPING)'],
+        ['\u206E', 'U+206E (NATIONAL DIGIT SHAPES)'],
+        ['\u206F', 'U+206F (NOMINAL DIGIT SHAPES)'],
+        // Soft hyphen (often invisible)
+        ['\u00AD', 'U+00AD (SOFT HYPHEN)'],
+    ]);
+
+    for (const [char, description] of invisibleChars) {
+        if (command.includes(char)) {
+            return { detected: true, char, codepoint: description };
+        }
+    }
+
+    return { detected: false };
+}
+
+/**
  * Validates a command for a specific shell, checking for shell-specific blocked operators
  */
 export function validateShellOperators(command: string, shellConfig: ShellConfig, configPath: string | null = null): void {
-    // Check for dangerous control characters first
-    if (containsDangerousCharacters(command)) {
+    // STEP 1: Normalize Unicode to NFC form to prevent composed/decomposed character attacks
+    const normalizedCommand = normalizeUnicode(command);
+
+    // STEP 2: Check for PowerShell Unicode quotes (CVE-like vulnerability)
+    const unicodeQuoteCheck = detectPowerShellUnicodeQuotes(normalizedCommand);
+    if (unicodeQuoteCheck.detected) {
+        throw new Error(formatEnhancedError({
+            what: `Command contains PowerShell Unicode quote: ${unicodeQuoteCheck.codepoint}`,
+            why: 'PowerShell interprets Unicode quotation marks (U+201C, U+201D, U+2018, U+2019) as string delimiters, allowing command injection attacks. These "smart quotes" are often inserted by word processors.',
+            howToFix: [
+                `Replace the Unicode quote character '${unicodeQuoteCheck.char}' with a standard ASCII quote (") or (')`,
+                'Retype the command manually instead of copying from Word, email, or web pages',
+                'Use a plain text editor that doesn\'t auto-convert quotes'
+            ],
+            warning: 'PowerShell Unicode quote injection is a documented security vulnerability. This protection cannot be disabled.',
+            tip: 'Reference: https://blog.stmcyber.com/powershell-unicode-quotes-and-command-injection/',
+            configPath
+        }));
+    }
+
+    // STEP 3: Check for BiDi control characters (CVE-2021-42574 "Trojan Source")
+    const bidiCheck = detectBidiControlCharacters(normalizedCommand);
+    if (bidiCheck.detected) {
+        throw new Error(formatEnhancedError({
+            what: `Command contains Bidirectional (BiDi) control character: ${bidiCheck.codepoint}`,
+            why: 'BiDi override characters (U+202E, U+202D, etc.) can hide malicious code by reversing the display order of text. This is known as the "Trojan Source" attack (CVE-2021-42574).',
+            howToFix: [
+                'Remove the BiDi control character from your command',
+                'Retype the command manually from a trusted source',
+                'Inspect the command using a hex editor to identify hidden control characters'
+            ],
+            warning: 'BiDi text attacks can make malicious code appear legitimate in logs and source code. This protection cannot be disabled.',
+            tip: 'Reference: CVE-2021-42574 - Trojan Source vulnerability',
+            configPath
+        }));
+    }
+
+    // STEP 4: Check for suspicious combining characters
+    const combiningCheck = detectSuspiciousCombiningCharacters(normalizedCommand);
+    if (combiningCheck.detected) {
+        throw new Error(formatEnhancedError({
+            what: 'Command contains combining diacritical marks or symbol modifiers',
+            why: 'Combining characters can be used to hide or visually modify operators and commands, bypassing security filters.',
+            howToFix: [
+                'Remove any combining characters from your command',
+                'Use only base ASCII characters for operators and commands',
+                'Retype the command manually instead of copying from untrusted sources'
+            ],
+            warning: 'Combining character attacks can make malicious operators appear as innocent text.',
+            tip: 'Reference: UTS #39 Unicode Security Mechanisms',
+            configPath
+        }));
+    }
+
+    // STEP 5: Check for additional invisible Unicode characters
+    const invisibleCheck = detectInvisibleUnicodeCharacters(normalizedCommand);
+    if (invisibleCheck.detected) {
+        throw new Error(formatEnhancedError({
+            what: `Command contains invisible Unicode character: ${invisibleCheck.codepoint}`,
+            why: 'Invisible characters like variation selectors, word joiners, and formatting controls can be used to bypass security filters or hide malicious content.',
+            howToFix: [
+                `Remove the invisible character '${invisibleCheck.char}' from your command`,
+                'Retype the command manually instead of copying',
+                'Use a text editor with "show invisible characters" enabled to identify them'
+            ],
+            warning: 'Invisible Unicode characters are a common stealth attack vector.',
+            configPath
+        }));
+    }
+
+    // STEP 6: Check for dangerous control characters
+    if (containsDangerousCharacters(normalizedCommand)) {
         throw new Error(formatEnhancedError({
             what: 'Command contains dangerous control characters.',
             why: 'Control characters (null bytes, non-printable characters) can be used to bypass security checks or inject malicious commands.',
@@ -161,20 +359,21 @@ export function validateShellOperators(command: string, shellConfig: ShellConfig
         return;
     }
 
-    // Enhanced operator blocking with more comprehensive patterns
+    // STEP 7: Enhanced operator blocking with more comprehensive patterns
     const dangerousOperators = [
         ...shellConfig.blockedOperators,
-        // Add common redirection and injection operators
-        '>',   // Output redirection
-        '<',   // Input redirection
+        // Add common redirection and injection operators (order matters - check longest first!)
+        '2>&1', // Combine streams
         '>>',  // Append redirection
         '2>',  // Error redirection
-        '2>&1' // Combine streams
+        '>',   // Output redirection
+        '<',   // Input redirection
     ];
 
     // Check for each operator explicitly (no regex escaping issues)
+    // Order matters: check longest operators first to avoid false positives
     for (const op of dangerousOperators) {
-        if (command.includes(op)) {
+        if (normalizedCommand.includes(op)) {
             const configLocationMsg = getConfigLocationMessage(configPath);
             throw new Error(formatEnhancedError({
                 what: `Command contains blocked operator: '${op}'`,
@@ -221,9 +420,10 @@ export function validateShellOperators(command: string, shellConfig: ShellConfig
         ],
     };
 
+    // STEP 8: Check for Unicode variants and homoglyphs of operators
     for (const [ascii, variants] of Object.entries(unicodeVariants)) {
         for (const variant of variants) {
-            if (command.includes(variant)) {
+            if (normalizedCommand.includes(variant)) {
                 throw new Error(formatEnhancedError({
                     what: `Command contains Unicode variant of blocked operator: '${ascii}' (detected: '${variant}')`,
                     why: 'Attackers use Unicode lookalike characters (homoglyphs) to bypass security filters. These characters appear like normal operators but use different Unicode codepoints.',
@@ -240,7 +440,7 @@ export function validateShellOperators(command: string, shellConfig: ShellConfig
         }
     }
 
-    // Check for zero-width characters that could be used to split operators
+    // STEP 9: Check for zero-width characters that could be used to split operators
     const zeroWidthChars = [
         '\u200B',  // Zero-width space
         '\u200C',  // Zero-width non-joiner
@@ -249,7 +449,7 @@ export function validateShellOperators(command: string, shellConfig: ShellConfig
     ];
 
     for (const char of zeroWidthChars) {
-        if (command.includes(char)) {
+        if (normalizedCommand.includes(char)) {
             throw new Error(formatEnhancedError({
                 what: 'Command contains zero-width characters.',
                 why: 'Zero-width characters are invisible but can be used to bypass security filters by splitting operators or commands. They are commonly inserted by malicious scripts.',
@@ -429,6 +629,12 @@ export function validateWorkingDirectory(dir: string, allowedPaths: string[]): v
 export function normalizeWindowsPath(inputPath: string): string {
     // Convert forward slashes to backslashes
     let normalized = inputPath.replace(/\//g, '\\');
+
+    // Handle UNC paths (\\server\share)
+    if (normalized.startsWith('\\\\')) {
+        // UNC path - preserve as-is and normalize
+        return path.normalize(normalized);
+    }
 
     // Handle Windows drive letter
     if (/^[a-zA-Z]:\\.+/.test(normalized)) {
