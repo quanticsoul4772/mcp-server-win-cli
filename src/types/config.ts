@@ -46,6 +46,12 @@ export interface SSHConfig {
   keepaliveInterval: number;
   keepaliveCountMax: number;
   readyTimeout: number;
+  /**
+   * Enable strict host key checking to prevent MITM attacks.
+   * - true (default): Reject connections to unknown hosts
+   * - false: Use Trust On First Use (TOFU) - accept and store new host keys
+   */
+  strictHostKeyChecking: boolean;
 }
 
 export interface ServerConfig {

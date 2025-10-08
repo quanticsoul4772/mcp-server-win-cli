@@ -104,6 +104,10 @@ export function secureDeepMerge<T extends PlainObject>(
 
   // For restrictive array keys (blockedCommands, blockedArguments), use union to combine restrictions
   // For permissive array keys (allowedPaths), use intersection to prevent weakening
+  //
+  // IMPORTANT: Intersection means paths must exist in BOTH configs.
+  // This can result in ZERO allowed paths if there's no overlap!
+  // Validation warnings should be added by the caller to detect this condition.
   for (const keyPath of restrictiveArrayKeys) {
     const keys = keyPath.split('.');
     let defaultValue: any = defaultConfig;
@@ -124,6 +128,7 @@ export function secureDeepMerge<T extends PlainObject>(
     if (Array.isArray(defaultVal) && Array.isArray(userVal) && resultValue) {
       // For allowedPaths: intersection (only paths in both lists are allowed)
       // This prevents users from adding unrestricted paths
+      // WARNING: Can result in empty array if no paths overlap!
       const defaultSet = new Set(defaultVal.map((v: any) => String(v).toLowerCase()));
       const intersection = userVal.filter((v: any) =>
         defaultSet.has(String(v).toLowerCase())

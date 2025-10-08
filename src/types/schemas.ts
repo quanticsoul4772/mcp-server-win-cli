@@ -53,6 +53,7 @@ export const SSHConfigSchema = z.object({
   keepaliveInterval: z.number().int().positive(),
   keepaliveCountMax: z.number().int().positive(),
   readyTimeout: z.number().int().positive(),
+  strictHostKeyChecking: z.boolean(),
 });
 
 // Server Config Schema
