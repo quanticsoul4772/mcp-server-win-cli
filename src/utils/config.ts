@@ -112,8 +112,13 @@ function mergeConfigs(defaultConfig: ServerConfig, userConfig: Partial<ServerCon
     'security.enableInjectionProtection'
   ];
 
+  // Define restrictive array keys (use intersection to prevent weakening)
+  const restrictiveArrayKeys = [
+    'security.allowedPaths'
+  ];
+
   // Perform secure deep merge
-  const merged = secureDeepMerge(defaultConfig, userConfig, securityCriticalKeys);
+  const merged = secureDeepMerge(defaultConfig, userConfig, securityCriticalKeys, restrictiveArrayKeys);
 
   // Ensure validatePath functions are preserved (they're functions, not serialized)
   for (const [key, shell] of Object.entries(merged.shells) as [keyof typeof merged.shells, ShellConfig][]) {

@@ -75,11 +75,34 @@ export function validateShellOperators(command: string, shellConfig: ShellConfig
         }
     }
 
-    // Check for Unicode variants of common operators
+    // Check for Unicode variants and homoglyphs of common operators
     const unicodeVariants = {
-        '|': ['｜', '\uFF5C'],  // Fullwidth vertical line
-        ';': ['；', '\uFF1B'],  // Fullwidth semicolon
-        '&': ['＆', '\uFF06'],  // Fullwidth ampersand
+        '|': [
+            '｜', '\uFF5C',  // Fullwidth vertical line
+            '│', '\u2502',  // Box drawings light vertical
+            '⏐', '\u23D0',  // Vertical line extension
+            '∣', '\u2223',  // Divides
+            'ǀ', '\u01C0',  // Latin letter dental click
+        ],
+        ';': [
+            '；', '\uFF1B',  // Fullwidth semicolon
+            '᛫', '\u16EB',  // Runic single punctuation
+            '︔', '\uFE14',  // Presentation form vertical semicolon
+        ],
+        '&': [
+            '＆', '\uFF06',  // Fullwidth ampersand
+            '﹠', '\uFE60',  // Small ampersand
+        ],
+        '>': [
+            '＞', '\uFF1E',  // Fullwidth greater-than
+            '›', '\u203A',  // Single right-pointing angle quotation mark
+            '❯', '\u276F',  // Heavy right-pointing angle quotation mark
+        ],
+        '<': [
+            '＜', '\uFF1C',  // Fullwidth less-than
+            '‹', '\u2039',  // Single left-pointing angle quotation mark
+            '❮', '\u276E',  // Heavy left-pointing angle quotation mark
+        ],
     };
 
     for (const [ascii, variants] of Object.entries(unicodeVariants)) {
@@ -87,6 +110,20 @@ export function validateShellOperators(command: string, shellConfig: ShellConfig
             if (command.includes(variant)) {
                 throw new Error(`Command contains Unicode variant of blocked operator: ${ascii}`);
             }
+        }
+    }
+
+    // Check for zero-width characters that could be used to split operators
+    const zeroWidthChars = [
+        '\u200B',  // Zero-width space
+        '\u200C',  // Zero-width non-joiner
+        '\u200D',  // Zero-width joiner
+        '\uFEFF',  // Zero-width no-break space
+    ];
+
+    for (const char of zeroWidthChars) {
+        if (command.includes(char)) {
+            throw new Error('Command contains zero-width characters');
         }
     }
 }
@@ -105,9 +142,20 @@ export function parseCommand(fullCommand: string): { command: string; args: stri
     let inQuotes = false;
     let quoteChar = '';
 
-    // Parse into tokens, preserving quoted strings
+    // Parse into tokens, preserving quoted strings and handling escapes
     for (let i = 0; i < fullCommand.length; i++) {
         const char = fullCommand[i];
+
+        // Handle escape sequences (backslash)
+        if (char === '\\' && i + 1 < fullCommand.length) {
+            const nextChar = fullCommand[i + 1];
+            // Escape quotes, backslashes, and certain special chars
+            if (nextChar === '"' || nextChar === "'" || nextChar === '\\') {
+                current += nextChar;
+                i++; // Skip the next character
+                continue;
+            }
+        }
 
         // Handle quotes
         if ((char === '"' || char === "'") && (!inQuotes || char === quoteChar)) {

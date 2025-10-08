@@ -12,10 +12,13 @@ export class SSHConnection {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
   private baseBackoffMs: number = 1000; // 1 second base delay
+  private isFailed: boolean = false;
+  private onFailureCallback?: () => void;
 
-  constructor(config: SSHConnectionConfig) {
+  constructor(config: SSHConnectionConfig, onFailure?: () => void) {
     this.client = new Client();
     this.config = config;
+    this.onFailureCallback = onFailure;
     this.setupClientEvents();
   }
 
@@ -39,13 +42,21 @@ export class SSHConnection {
   }
 
   private scheduleReconnect() {
+    // Clear any existing timer first
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
 
     // Check if we've exceeded max reconnect attempts
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error(`Max reconnection attempts (${this.maxReconnectAttempts}) reached for ${this.config.host}`);
+      // Mark connection as permanently failed
+      this.isFailed = true;
+      // Notify pool to remove this connection
+      if (this.onFailureCallback) {
+        this.onFailureCallback();
+      }
       return;
     }
 
@@ -109,6 +120,11 @@ export class SSHConnection {
             this.isConnected = true;
             this.lastActivity = Date.now();
             this.reconnectAttempts = 0; // Reset on successful connection
+            // Clear any pending reconnect timer
+            if (this.reconnectTimer) {
+              clearTimeout(this.reconnectTimer);
+              this.reconnectTimer = null;
+            }
             resolve();
           })
           .on('error', (err) => {
@@ -141,14 +157,12 @@ export class SSHConnection {
         const psCheck = await this.executeCommandInternal('$PSVersionTable.PSVersion');
         if (psCheck.exitCode === 0 && psCheck.output.trim()) {
           this.detectedShellType = 'powershell';
-        } else {
-          // Default to bash for Unix-like systems
-          this.detectedShellType = 'bash';
         }
+        // Fail-closed: leave as 'unknown' if detection fails
       }
     } catch (error) {
-      // If detection fails, assume bash (most common for SSH)
-      this.detectedShellType = 'bash';
+      // Fail-closed: leave as 'unknown' if detection fails
+      // Caller should use most restrictive validation rules
     }
 
     return this.detectedShellType;
@@ -218,6 +232,10 @@ export class SSHConnection {
   isActive(): boolean {
     return this.isConnected;
   }
+
+  hasFailed(): boolean {
+    return this.isFailed;
+  }
 }
 
 // Connection pool to manage multiple SSH connections
@@ -266,13 +284,26 @@ export class SSHConnectionPool {
 
     let connection = this.connections.get(connectionId);
 
+    // Remove failed connections
+    if (connection && connection.hasFailed()) {
+      console.error(`Removing failed connection: ${connectionId}`);
+      await this.closeConnection(connectionId);
+      connection = undefined;
+    }
+
     if (!connection) {
       // Check if we need to evict due to pool size limit
       if (this.connections.size >= this.maxPoolSize) {
         this.evictOldest();
       }
 
-      connection = new SSHConnection(config);
+      // Create connection with failure callback
+      connection = new SSHConnection(config, () => {
+        // Remove from pool when permanently failed
+        this.closeConnection(connectionId).catch(err => {
+          console.error(`Error removing failed connection ${connectionId}:`, err);
+        });
+      });
       this.connections.set(connectionId, connection);
       this.connectionAges.set(connectionId, Date.now());
       await connection.connect();

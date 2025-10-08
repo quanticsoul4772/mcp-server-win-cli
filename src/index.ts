@@ -587,12 +587,25 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
             // Execute command
             return new Promise((resolve, reject) => {
               let shellProcess: ReturnType<typeof spawn>;
-              
+
               try {
+                // Re-canonicalize immediately before spawn to prevent TOCTOU race condition
+                const finalWorkingDir = canonicalizePath(workingDir);
+
+                // Verify path is still allowed (prevents symlink attacks)
+                if (this.config.security.restrictWorkingDirectory) {
+                  if (!isPathAllowed(finalWorkingDir, Array.from(this.allowedPaths))) {
+                    throw new McpError(
+                      ErrorCode.InvalidRequest,
+                      `Working directory validation failed at execution time. Possible symlink manipulation detected.`
+                    );
+                  }
+                }
+
                 shellProcess = spawn(
                   shellConfig.command,
                   [...shellConfig.args, args.command],
-                  { cwd: workingDir, stdio: ['pipe', 'pipe', 'pipe'] }
+                  { cwd: finalWorkingDir, stdio: ['pipe', 'pipe', 'pipe'] }
                 );
               } catch (err) {
                 throw new McpError(
@@ -769,12 +782,14 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
               const remoteShellType = await this.sshPool.getRemoteShellType(args.connectionId);
 
               // Map remote shell type to local shell config for validation
-              let validationShell: keyof ServerConfig['shells'] = 'gitbash'; // Default to bash-like
-              if (remoteShellType === 'powershell') {
+              // Fail-closed: use most restrictive rules (cmd) for unknown shells
+              let validationShell: keyof ServerConfig['shells'] = 'cmd';
+              if (remoteShellType === 'bash' || remoteShellType === 'sh') {
+                validationShell = 'gitbash';
+              } else if (remoteShellType === 'powershell') {
                 validationShell = 'powershell';
-              } else if (remoteShellType === 'cmd') {
-                validationShell = 'cmd';
               }
+              // If remoteShellType is 'unknown', use 'cmd' (most restrictive)
 
               // Validate command with appropriate shell context
               this.validateCommand(validationShell, args.command);

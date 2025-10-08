@@ -63,7 +63,8 @@ export function deepMerge<T extends PlainObject>(target: T, source: Partial<T>):
 export function secureDeepMerge<T extends PlainObject>(
   defaultConfig: T,
   userConfig: Partial<T>,
-  securityKeys: string[] = []
+  securityKeys: string[] = [],
+  restrictiveArrayKeys: string[] = []
 ): T {
   const result = deepMerge(defaultConfig, userConfig);
 
@@ -98,6 +99,36 @@ export function secureDeepMerge<T extends PlainObject>(
       else if (Array.isArray(defaultVal) && Array.isArray(userVal)) {
         resultValue[lastKey] = [...new Set([...defaultVal, ...userVal])];
       }
+    }
+  }
+
+  // For restrictive array keys (blockedCommands, blockedArguments), use union to combine restrictions
+  // For permissive array keys (allowedPaths), use intersection to prevent weakening
+  for (const keyPath of restrictiveArrayKeys) {
+    const keys = keyPath.split('.');
+    let defaultValue: any = defaultConfig;
+    let userValue: any = userConfig;
+    let resultValue: any = result;
+
+    // Navigate to the nested value
+    for (let i = 0; i < keys.length - 1; i++) {
+      defaultValue = defaultValue?.[keys[i]];
+      userValue = userValue?.[keys[i]];
+      resultValue = resultValue?.[keys[i]];
+    }
+
+    const lastKey = keys[keys.length - 1];
+    const defaultVal = defaultValue?.[lastKey];
+    const userVal = userValue?.[lastKey];
+
+    if (Array.isArray(defaultVal) && Array.isArray(userVal) && resultValue) {
+      // For allowedPaths: intersection (only paths in both lists are allowed)
+      // This prevents users from adding unrestricted paths
+      const defaultSet = new Set(defaultVal.map((v: any) => String(v).toLowerCase()));
+      const intersection = userVal.filter((v: any) =>
+        defaultSet.has(String(v).toLowerCase())
+      );
+      resultValue[lastKey] = [...new Set(intersection)];
     }
   }
 
