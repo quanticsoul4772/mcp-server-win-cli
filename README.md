@@ -1,34 +1,26 @@
 # Windows CLI MCP Server
 
 > [!NOTE]
-> **v0.3.0 - ACTIVE DEVELOPMENT** 🚀
-> This project has been revived with comprehensive security improvements and enhanced stability!
-> See [IMPROVEMENTS.md](IMPROVEMENTS.md) for full details on all enhancements.
+> v0.3.0 - Active development. This project has been revived with security improvements and enhanced stability.
+> See [IMPROVEMENTS.md](IMPROVEMENTS.md) for details.
 
 [![NPM Downloads](https://img.shields.io/npm/dt/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli)
 [![NPM Version](https://img.shields.io/npm/v/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli?activeTab=versions)
 [![smithery badge](https://smithery.ai/badge/@simonb97/server-win-cli)](https://smithery.ai/server/@simonb97/server-win-cli)
 
-[MCP server](https://modelcontextprotocol.io/introduction) for **secure command-line interactions** on Windows systems, enabling controlled access to PowerShell, CMD, Git Bash shells, and remote systems via SSH. It allows MCP clients (like [Claude Desktop](https://claude.ai/download)) to perform operations on your system with enterprise-grade security.
+[MCP server](https://modelcontextprotocol.io/introduction) for secure command-line interactions on Windows systems, enabling controlled access to PowerShell, CMD, Git Bash shells, and remote systems via SSH. It allows MCP clients (like [Claude Desktop](https://claude.ai/download)) to perform operations on your system.
 
-## ✨ What's New in v0.3.0
+## What's New in v0.3.0
 
-- 🔒 **Enhanced Security**: Fixed critical vulnerabilities (path traversal, command injection, race conditions)
-- 🛡️ **Information Protection**: Error message sanitization prevents disclosure of internal paths
-- 🔄 **Smart SSH**: Auto-detection of remote shell types with proper validation
-- ⚡ **Resource Management**: Connection pool limits, automatic cleanup, exponential backoff
-- 🎯 **Improved Config**: Secure deep merge preserves security settings
-- 📝 **Better Logging**: Comprehensive audit trail with periodic cleanup
+- Enhanced security: Fixed critical vulnerabilities (path traversal, command injection, race conditions)
+- Information protection: Error message sanitization prevents disclosure of internal paths
+- Smart SSH: Auto-detection of remote shell types with proper validation
+- Resource management: Connection pool limits, automatic cleanup, exponential backoff
+- Improved config: Secure deep merge preserves security settings
+- Better logging: Audit trail with periodic cleanup
 
 >[!IMPORTANT]
-> This MCP server provides direct access to your system's command line interface and remote systems via SSH. When enabled, it grants access to your files, environment variables, command execution capabilities, and remote server management.
->
-> - Review and restrict allowed paths and SSH connections
-> - Enable directory restrictions
-> - Configure command blocks
-> - Consider security implications
->
-> See [Configuration](#configuration) for more details.
+> This MCP server provides direct access to your system's command line interface and remote systems via SSH. When enabled, it grants access to your files, environment variables, command execution capabilities, and remote server management. Review and restrict allowed paths and SSH connections, enable directory restrictions, and configure command blocks. See [Configuration](#configuration) for details.
 
 - [Features](#features)
 - [Usage with Claude Desktop](#usage-with-claude-desktop)
@@ -42,30 +34,29 @@
 - [API](#api)
   - [Tools](#tools)
   - [Resources](#resources)
-- [Security Considerations](#security-considerations)
 - [License](#license)
 
 ## Features
 
-- **Multi-Shell Support**: Execute commands in PowerShell, Command Prompt (CMD), and Git Bash
-- **SSH Support**: Execute commands on remote systems via SSH
-- **Resource Exposure**: View SSH connections, current directory, and configuration as MCP resources
-- **Security Controls**:
+- Multi-shell support: Execute commands in PowerShell, Command Prompt (CMD), and Git Bash
+- SSH support: Execute commands on remote systems via SSH
+- Resource exposure: View SSH connections, current directory, and configuration as MCP resources
+- Security controls:
   - Command and SSH command blocking (full paths, case variations)
   - Working directory validation
   - Maximum command length limits
   - Command logging and history tracking
   - Smart argument validation
-- **Configurable**:
+- Configurable:
   - Custom security rules
   - Shell-specific settings
   - SSH connection profiles
   - Path restrictions
   - Blocked command lists
 
-See the [API](#api) section for more details on the tools and resources the server provides to MCP clients.
+See the [API](#api) section for details on the tools and resources the server provides to MCP clients.
 
-**Note**: The server will only allow operations within configured directories, with allowed commands, and on configured SSH connections.
+Note: The server will only allow operations within configured directories, with allowed commands, and on configured SSH connections.
 
 ## Usage with Claude Desktop
 
@@ -133,7 +124,7 @@ If no configuration file is found, the server will use a default (restricted) co
 
 ### Default Configuration
 
-**Note**: The default configuration is designed to be restrictive and secure. Find more details on each setting in the [Configuration Settings](#configuration-settings) section.
+Note: The default configuration is designed to be restrictive and secure. Find more details on each setting in the [Configuration Settings](#configuration-settings) section.
 
 ```json
 {
@@ -435,38 +426,6 @@ The configuration file is divided into three main sections: `security`, `shells`
   - URI: `cli://config`
   - Contains the CLI server configuration (excluding sensitive data)
   - Shows security settings, shell configurations, and SSH settings
-
-## Security Considerations
-
-### Built-in Security Features (Always Active)
-
-The following security features are hard-coded into the server and cannot be disabled:
-
-- **Case-insensitive command blocking**: All command blocking is case-insensitive (e.g., "DEL.EXE", "del.cmd", etc. are all blocked if "del" is in blockedCommands)
-- **Smart path parsing**: The server parses full command paths to prevent bypass attempts (blocking "C:\\Windows\\System32\\rm.exe" if "rm" is blocked)
-- **Command parsing intelligence**: False positives are avoided (e.g., "warm_dir" is not blocked just because "rm" is in blockedCommands)
-- **Input validation**: All user inputs are validated before execution
-- **Shell process management**: Processes are properly terminated after execution or timeout
-- **Sensitive data masking**: Passwords are automatically masked in resources (replaced with ********)
-
-### Configurable Security Features (Active by Default)
-
-These security features are configurable through the config.json file:
-
-- **Command blocking**: Commands specified in `blockedCommands` array are blocked (default includes dangerous commands like rm, del, format)
-- **Argument blocking**: Arguments specified in `blockedArguments` array are blocked (default includes potentially dangerous flags)
-- **Command injection protection**: Prevents command chaining (enabled by default through `enableInjectionProtection: true`)
-- **Working directory restriction**: Limits command execution to specified directories (enabled by default through `restrictWorkingDirectory: true`)
-- **Command length limit**: Restricts maximum command length (default: 2000 characters)
-- **Command timeout**: Terminates commands that run too long (default: 30 seconds)
-- **Command logging**: Records command history (enabled by default through `logCommands: true`)
-
-### Important Security Warnings
-
-These are not features but important security considerations to be aware of:
-
-- **Environment access**: Commands may have access to environment variables, which could contain sensitive information
-- **File system access**: Commands can read/write files within allowed paths - carefully configure `allowedPaths` to prevent access to sensitive data
 
 ## License
 
