@@ -16,6 +16,7 @@
 ## What's New in v0.3.0
 
 - Enhanced security: Fixed critical vulnerabilities (path traversal, command injection, race conditions)
+- SSH host key verification: Prevents MITM attacks with Trust On First Use (TOFU) mode
 - Information protection: Error message sanitization prevents disclosure of internal paths
 - Smart SSH: Auto-detection of remote shell types with proper validation
 - Resource management: Connection pool limits, automatic cleanup, exponential backoff
@@ -37,6 +38,15 @@
 - [API](#api)
   - [Tools](#tools)
   - [Resources](#resources)
+- [Troubleshooting](#troubleshooting)
+  - [Understanding Exit Codes](#understanding-exit-codes)
+  - [Issue: "Command is blocked"](#issue-command-is-blocked-or-command-contains-blocked-command)
+  - [Issue: "Path not allowed"](#issue-path-not-allowed-or-working-directory-outside-allowed-paths)
+  - [Issue: SSH Connection Failed](#issue-ssh-connection-failed)
+  - [Issue: Command Times Out](#issue-command-times-out)
+  - [Issue: Shell Operators Blocked](#issue-shell-operators-blocked-pipes-redirects-command-chaining)
+  - [Using Diagnostic Tools](#using-diagnostic-tools)
+  - [Getting Help](#getting-help)
 - [License](#license)
 
 ## Features
@@ -45,6 +55,7 @@
 - SSH support: Execute commands on remote systems via SSH
 - Resource exposure: View SSH connections, current directory, and configuration as MCP resources
 - Security controls:
+  - SSH host key verification (prevents MITM attacks)
   - Command and SSH command blocking (full paths, case variations)
   - Working directory validation
   - Maximum command length limits
@@ -314,6 +325,11 @@ The configuration file is divided into three main sections: `security`, `shells`
     // Timeout for establishing SSH connections (in milliseconds)
     "readyTimeout": 20000,
 
+    // Enable strict host key checking (recommended for security)
+    // - true (default): Reject connections to unknown hosts (prevents MITM attacks)
+    // - false: Use Trust On First Use (TOFU) - accept and store new host keys
+    "strictHostKeyChecking": true,
+
     // SSH connection profiles
     "connections": {
       // NOTE: these examples are not set in the default config!
@@ -436,6 +452,595 @@ The configuration file is divided into three main sections: `security`, `shells`
   - URI: `cli://config`
   - Contains the CLI server configuration (excluding sensitive data)
   - Shows security settings, shell configurations, and SSH settings
+
+## Troubleshooting
+
+This section covers common issues and their solutions when using the Windows CLI MCP Server.
+
+### Understanding Exit Codes
+
+The server uses specific exit codes to indicate the result of command execution:
+
+- **0**: Success - Command executed successfully
+- **-1**: Execution failure - Command failed to run, timed out, or encountered a process error
+- **-2**: Validation failure - Command was blocked by security rules before execution
+
+When you see a non-zero exit code, check the error message to understand what went wrong.
+
+### Issue: "Command is blocked" or "Command contains blocked command"
+
+**Symptoms:**
+- Command execution returns exit code `-2`
+- Error message: "Command contains blocked command: [command]"
+- Commands like `del`, `rm`, `shutdown`, or `reg` fail immediately
+
+**Cause:**
+The command or one of its arguments matches an entry in the `security.blockedCommands` or `security.blockedArguments` list. The server blocks these commands to prevent potentially dangerous operations.
+
+**Solution:**
+
+1. First, verify which commands are blocked using the diagnostic tool:
+   ```json
+   {
+     "tool": "check_security_config",
+     "arguments": {
+       "category": "commands"
+     }
+   }
+   ```
+
+2. If you need to allow a specific command, create or edit your `config.json`:
+   ```json
+   {
+     "security": {
+       "blockedCommands": [
+         // Remove the command you want to allow from this list
+         // Or create a minimal list with only commands you want to block
+         "format",
+         "shutdown",
+         "reg",
+         "regedit"
+       ]
+     }
+   }
+   ```
+
+3. **Important**: If you're using a custom config file, remember that the server uses secure merge logic:
+   - **Blocked commands and arguments use UNION**: Both default blocks AND your custom blocks are combined
+   - To completely override the defaults, you must explicitly list ONLY the commands you want to block
+
+4. Restart the MCP server after changing the configuration (restart Claude Desktop or your MCP client)
+
+**Prevention:**
+- Review the [Default Configuration](#default-configuration) section to understand which commands are blocked by default
+- Use the `validate_command` tool to test commands before running them
+- Consider using alternative commands (e.g., `Remove-Item` in PowerShell instead of `rm`)
+
+**Related Configuration:**
+See [Security Settings](#security-settings) for details on `blockedCommands` and `blockedArguments`.
+
+### Issue: "Path not allowed" or "Working directory outside allowed paths"
+
+**Symptoms:**
+- Command execution returns exit code `-2`
+- Error message: "Working directory is outside allowed paths"
+- Commands fail even though they seem safe
+
+**Cause:**
+You're trying to execute a command in a directory that's not in the `security.allowedPaths` list, and `security.restrictWorkingDirectory` is set to `true`.
+
+**CRITICAL: Understanding Config Merge Behavior**
+
+The server uses a **security-first merge strategy** for `allowedPaths`:
+
+- **allowedPaths uses INTERSECTION** (not union!)
+- Only paths that appear in BOTH the default config AND your custom config are allowed
+- This prevents accidentally weakening security by adding overly broad paths
+
+**Example of INCORRECT configuration:**
+```json
+// DEFAULT CONFIG (implicit):
+// allowedPaths: ["C:\\Users\\YourName", "C:\\Development\\Projects\\MCP\\project-root"]
+
+// YOUR CONFIG:
+{
+  "security": {
+    "allowedPaths": ["C:\\MyProjects"]  // This will BLOCK everything!
+  }
+}
+
+// RESULT: Intersection = [] (empty!)
+// No paths are allowed because there's no overlap!
+```
+
+**Example of CORRECT configuration:**
+```json
+// DEFAULT CONFIG (implicit):
+// allowedPaths: ["C:\\Users\\YourName", "C:\\Development\\Projects\\MCP\\project-root"]
+
+// YOUR CONFIG:
+{
+  "security": {
+    "allowedPaths": [
+      "C:\\Users\\YourName",  // Keep defaults you want
+      "C:\\Development\\Projects\\MCP\\project-root",  // Keep defaults you want
+      "C:\\MyProjects"  // Add new paths
+    ]
+  }
+}
+
+// RESULT: All three paths are allowed
+```
+
+**Solution:**
+
+1. Check which paths are currently allowed:
+   ```json
+   {
+     "tool": "check_security_config",
+     "arguments": {
+       "category": "paths"
+     }
+   }
+   ```
+
+2. Identify your current working directory:
+   ```json
+   {
+     "tool": "read_current_directory"
+   }
+   ```
+
+3. Update your `config.json` to include BOTH the defaults AND your new paths:
+   ```json
+   {
+     "security": {
+       "allowedPaths": [
+         "C:\\Users\\YourUsername",  // Include existing defaults!
+         "C:\\Development\\Projects",  // Include existing defaults!
+         "C:\\YourNewPath"  // Add your new path
+       ],
+       "restrictWorkingDirectory": true
+     }
+   }
+   ```
+
+4. **Alternative**: Disable path restrictions entirely (NOT recommended for security):
+   ```json
+   {
+     "security": {
+       "restrictWorkingDirectory": false
+     }
+   }
+   ```
+
+5. Restart the MCP server
+
+**Prevention:**
+- Always include existing allowed paths when adding new ones
+- Use absolute paths (e.g., `C:\Users\Name` not `~` or relative paths)
+- Test path validation before running important commands using `validate_command`
+- Use forward slashes `/` or escaped backslashes `\\` in JSON config files
+
+**Related Configuration:**
+See [Security Settings](#security-settings) for details on `allowedPaths` and `restrictWorkingDirectory`.
+
+### Issue: SSH Connection Failed
+
+**Symptoms:**
+- `ssh_execute` or `validate_ssh_connection` returns an error
+- Error messages like "Connection refused", "Authentication failed", "Connection timeout", or "Host not found"
+- SSH commands work from terminal but fail through MCP
+
+**Common Causes:**
+
+1. **Network/Firewall Issues:**
+   - Firewall blocking port 22 (or custom SSH port)
+   - Host is unreachable or hostname resolution fails
+   - VPN required but not connected
+
+2. **Authentication Issues:**
+   - Incorrect username or password
+   - Private key file not found or has wrong permissions
+   - Private key requires passphrase (not supported)
+   - SSH key not authorized on remote server
+
+3. **Configuration Issues:**
+   - Wrong hostname or IP address
+   - Wrong port number
+   - SSH not enabled in server config
+   - Connection ID doesn't exist
+
+**Solution:**
+
+1. **Verify SSH is enabled in your config:**
+   ```json
+   {
+     "ssh": {
+       "enabled": true,  // Must be true!
+       "connections": {
+         // Your connections here
+       }
+     }
+   }
+   ```
+
+2. **Test the SSH connection configuration:**
+   ```json
+   {
+     "tool": "validate_ssh_connection",
+     "arguments": {
+       "connectionConfig": {
+         "host": "your-server.example.com",
+         "port": 22,
+         "username": "your-username",
+         "password": "your-password"  // Or use privateKeyPath
+       }
+     }
+   }
+   ```
+
+3. **For authentication failures:**
+
+   **Password authentication:**
+   ```json
+   {
+     "ssh": {
+       "enabled": true,
+       "connections": {
+         "my-server": {
+           "host": "server.example.com",
+           "port": 22,
+           "username": "admin",
+           "password": "your-password"  // Ensure password is correct
+         }
+       }
+     }
+   }
+   ```
+
+   **Key-based authentication:**
+   ```json
+   {
+     "ssh": {
+       "enabled": true,
+       "connections": {
+         "my-server": {
+           "host": "server.example.com",
+           "port": 22,
+           "username": "admin",
+           "privateKeyPath": "C:\\Users\\YourName\\.ssh\\id_rsa"  // Use full path
+         }
+       }
+     }
+   }
+   ```
+
+   **Important for key authentication:**
+   - Ensure the private key file exists at the specified path
+   - Private key must NOT require a passphrase (passphrase-protected keys are not supported)
+   - Public key must be added to `~/.ssh/authorized_keys` on the remote server
+   - Private key file permissions should be restrictive (read-only for owner)
+
+4. **For connection timeouts:**
+   - Increase timeout values in your config:
+   ```json
+   {
+     "ssh": {
+       "enabled": true,
+       "readyTimeout": 30000,  // 30 seconds to establish connection
+       "connections": {
+         "my-server": {
+           "host": "server.example.com",
+           "port": 22,
+           "username": "admin",
+           "password": "your-password",
+           "readyTimeout": 60000  // Override global timeout for this connection
+         }
+       }
+     }
+   }
+   ```
+
+5. **Check connection pool status:**
+   ```json
+   {
+     "tool": "read_ssh_pool_status"
+   }
+   ```
+
+6. **Test from command line first:**
+   ```bash
+   # Test if you can connect via standard SSH
+   ssh username@server.example.com
+   
+   # Test specific port
+   ssh -p 2222 username@server.example.com
+   ```
+
+7. **For "Host not found" errors:**
+   - Use IP address instead of hostname if DNS resolution is failing
+   - Verify hostname is correct and accessible from your network
+   - Check if VPN connection is required
+
+**Prevention:**
+- Use `validate_ssh_connection` before adding connections to verify configuration
+- Test SSH access from command line before configuring in MCP
+- Use key-based authentication for better security (ensure keys don't require passphrase)
+- Keep connection credentials up to date
+- Monitor connection pool status if managing many SSH connections
+
+**Related Configuration:**
+See [SSH Configuration](#ssh-configuration) for details on SSH settings.
+
+### Issue: Command Times Out
+
+**Symptoms:**
+- Command execution returns exit code `-1`
+- Error message: "Command execution timed out"
+- Long-running commands are killed before completion
+
+**Cause:**
+The command took longer than the configured `commandTimeout` (default: 30 seconds) to complete.
+
+**Solution:**
+
+1. **For individual commands**, override the timeout in the tool call:
+   ```json
+   {
+     "tool": "execute_command",
+     "arguments": {
+       "shell": "powershell",
+       "command": "your-long-running-command",
+       "timeout": 120  // 120 seconds for this command only
+     }
+   }
+   ```
+
+2. **For all commands**, increase the default timeout in your `config.json`:
+   ```json
+   {
+     "security": {
+       "commandTimeout": 120  // 120 seconds default for all commands
+     }
+   }
+   ```
+
+3. **For SSH commands**, configure SSH-specific timeout:
+   ```json
+   {
+     "ssh": {
+       "enabled": true,
+       "defaultTimeout": 120,  // 120 seconds for all SSH commands
+       "connections": {
+         "slow-server": {
+           "host": "server.example.com",
+           "port": 22,
+           "username": "admin",
+           "password": "password"
+           // This connection will use the defaultTimeout of 120 seconds
+         }
+       }
+     }
+   }
+   ```
+
+4. Restart the MCP server after changing configuration
+
+**Prevention:**
+- Set appropriate timeout values for your use case
+- Break long-running operations into smaller commands
+- Use background jobs or scheduled tasks for very long operations
+- Monitor command execution time using `read_command_history`
+
+**Related Configuration:**
+See [Security Settings](#security-settings) for `commandTimeout` and [SSH Configuration](#ssh-configuration) for `defaultTimeout`.
+
+### Issue: Shell Operators Blocked (Pipes, Redirects, Command Chaining)
+
+**Symptoms:**
+- Command execution returns exit code `-2`
+- Error message: "Command contains blocked operator: &" (or |, ;, >, <, etc.)
+- Commands with pipes, redirects, or command chaining fail
+- Error mentions Unicode variants or zero-width characters
+
+**Cause:**
+The server blocks shell operators (`&`, `|`, `;`, `` ` ``, `>`, `<`, `>>`, `2>`, `2>&1`) and their Unicode homoglyphs to prevent command injection attacks. This is a security feature enabled by default.
+
+**Solution:**
+
+1. **For PowerShell users**, use PowerShell cmdlets instead of pipes:
+   ```powershell
+   # Instead of: dir | findstr "test"
+   # Use: Get-ChildItem | Where-Object { $_.Name -like "*test*" }
+   
+   # Instead of: command1 && command2
+   # Use: command1; if ($?) { command2 }
+   ```
+
+2. **For simple output redirection**, capture output programmatically instead:
+   - The MCP server already captures and returns stdout/stderr
+   - Use `read_command_history` to review output from previous commands
+
+3. **For complex operations**, break into multiple separate commands:
+   ```json
+   // Instead of one command with pipes:
+   // "dir | findstr test > output.txt"
+   
+   // Execute as separate commands:
+   // Command 1:
+   {
+     "tool": "execute_command",
+     "arguments": {
+       "shell": "powershell",
+       "command": "Get-ChildItem | Where-Object { $_.Name -like '*test*' } | Out-String"
+     }
+   }
+   // Then save the result programmatically if needed
+   ```
+
+4. **If you absolutely must use operators** (NOT recommended for security):
+
+   You can modify blocked operators per shell in your `config.json`:
+   ```json
+   {
+     "shells": {
+       "powershell": {
+         "enabled": true,
+         "command": "powershell.exe",
+         "args": ["-NoProfile", "-NonInteractive", "-Command"],
+         "blockedOperators": [";", "`"]  // Only block some operators (RISKY!)
+       }
+     }
+   }
+   ```
+
+   **Warning**: Removing operator blocks significantly increases security risk. Only do this if you fully understand the implications.
+
+5. **Test before running:**
+   ```json
+   {
+     "tool": "validate_command",
+     "arguments": {
+       "shell": "powershell",
+       "command": "your-command-here"
+     }
+   }
+   ```
+
+**Prevention:**
+- Use PowerShell cmdlets and native command features instead of shell operators
+- Learn PowerShell piping syntax (`|`) which is safer within PowerShell context
+- Break complex operations into multiple commands
+- Understand that operator blocking is a critical security feature
+
+**Related Configuration:**
+See [Shell Configuration](#shell-configuration) for `blockedOperators` setting.
+
+### Using Diagnostic Tools
+
+The server provides built-in diagnostic tools to help troubleshoot issues:
+
+#### validate_command - Test Commands Before Running
+
+Validate a command without executing it to see if it would be blocked:
+
+```json
+{
+  "tool": "validate_command",
+  "arguments": {
+    "shell": "powershell",
+    "command": "Remove-Item test.txt",
+    "workingDir": "C:\\MyProjects"  // Optional
+  }
+}
+```
+
+**Returns:**
+- `isValid`: `true` if command would execute, `false` if blocked
+- `errors`: Array of validation errors if command would be blocked
+- `warnings`: Array of warnings about the command
+
+**Use cases:**
+- Test commands before running to avoid validation failures
+- Debug why specific commands are being blocked
+- Verify path and operator restrictions
+- Check command length limits
+
+#### check_security_config - Inspect Security Rules
+
+View current security configuration to understand what's blocked:
+
+```json
+{
+  "tool": "check_security_config",
+  "arguments": {
+    "category": "all"  // Options: "all", "commands", "paths", "operators", "limits"
+  }
+}
+```
+
+**Categories:**
+- `"commands"`: Shows blocked commands and arguments
+- `"paths"`: Shows allowed paths and directory restriction status
+- `"operators"`: Shows blocked operators for each shell
+- `"limits"`: Shows max command length and timeout settings
+- `"all"`: Shows everything
+
+**Use cases:**
+- Understand which commands are blocked and why
+- Verify allowed paths are configured correctly
+- Check timeout and length limits
+- Audit security configuration
+
+#### read_command_history - Review Past Executions
+
+Review command history to see exit codes and outputs:
+
+```json
+{
+  "tool": "read_command_history",
+  "arguments": {
+    "limit": 10  // Number of recent commands to retrieve
+  }
+}
+```
+
+**Returns:**
+Array of command history entries with:
+- `command`: The command that was executed
+- `timestamp`: When it was executed
+- `output`: Combined stdout/stderr
+- `exitCode`: Result code (0, -1, or -2)
+
+**Use cases:**
+- Track which commands succeeded or failed
+- Identify patterns in command failures
+- Review command outputs for debugging
+- Monitor command execution over time
+
+#### validate_ssh_connection - Test SSH Configuration
+
+Test SSH connection configuration before using it:
+
+```json
+{
+  "tool": "validate_ssh_connection",
+  "arguments": {
+    "connectionConfig": {
+      "host": "server.example.com",
+      "port": 22,
+      "username": "admin",
+      "password": "your-password"  // Or use privateKeyPath
+    }
+  }
+}
+```
+
+**Returns:**
+- `isValid`: Whether connection was successful
+- `shellType`: Detected shell type on remote server (bash, zsh, powershell, fish, etc.)
+- `error`: Error message if connection failed
+
+**Use cases:**
+- Test SSH credentials before adding to config
+- Verify network connectivity to remote hosts
+- Detect remote shell type for compatibility
+- Debug SSH authentication issues
+
+### Getting Help
+
+If you're still experiencing issues after trying these solutions:
+
+1. **Check the command history** to see exact error messages and exit codes
+2. **Use diagnostic tools** to validate your configuration and commands
+3. **Review the configuration merge behavior** - especially for `allowedPaths` (intersection) vs `blockedCommands` (union)
+4. **Check the GitHub repository** for known issues and updates: https://github.com/quanticsoul4772/win-cli-mcp-server
+5. **Report bugs** with:
+   - Error messages and exit codes
+   - Configuration file (sanitized - remove passwords!)
+   - Steps to reproduce
+   - Output from `check_security_config` diagnostic tool
 
 ## License
 

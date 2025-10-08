@@ -60,11 +60,12 @@ export const DEFAULT_CONFIG: ServerConfig = {
     keepaliveInterval: 10000,
     keepaliveCountMax: 3,
     readyTimeout: 20000,
+    strictHostKeyChecking: true,
     connections: {}
   }
 };
 
-export function loadConfig(configPath?: string): ServerConfig {
+export function loadConfig(configPath?: string): { config: ServerConfig; configPath: string | null } {
   // If no config path provided, look in default locations
   const configLocations = [
     configPath,
@@ -73,6 +74,7 @@ export function loadConfig(configPath?: string): ServerConfig {
   ].filter(Boolean);
 
   let loadedConfig: Partial<ServerConfig> = {};
+  let actualConfigPath: string | null = null;
 
   for (const location of configLocations) {
     if (!location) continue;
@@ -81,6 +83,7 @@ export function loadConfig(configPath?: string): ServerConfig {
       if (fs.existsSync(location)) {
         const fileContent = fs.readFileSync(location, 'utf8');
         loadedConfig = JSON.parse(fileContent);
+        actualConfigPath = location;
         console.error(`Loaded config from ${location}`);
         break;
       }
@@ -97,7 +100,7 @@ export function loadConfig(configPath?: string): ServerConfig {
   // Validate the merged config
   validateConfig(mergedConfig);
 
-  return mergedConfig;
+  return { config: mergedConfig, configPath: actualConfigPath };
 }
 
 function mergeConfigs(defaultConfig: ServerConfig, userConfig: Partial<ServerConfig>): ServerConfig {
@@ -117,6 +120,54 @@ function mergeConfigs(defaultConfig: ServerConfig, userConfig: Partial<ServerCon
 
   // Perform secure deep merge
   const merged = secureDeepMerge(defaultConfig, userConfig, securityCriticalKeys, restrictiveArrayKeys);
+
+  // Validate allowedPaths after merge - warn if intersection resulted in empty array
+  const userProvidedPaths = userConfig.security?.allowedPaths;
+  if (userProvidedPaths && userProvidedPaths.length > 0) {
+    if (merged.security.allowedPaths.length === 0) {
+      // Empty allowedPaths after intersection - user will be locked out
+      console.error('\n' + '='.repeat(80));
+      console.error('⚠️  WARNING: Config merge resulted in ZERO allowed paths!');
+      console.error('='.repeat(80));
+      console.error('');
+      console.error('Your config allowedPaths:');
+      userProvidedPaths.forEach(p => console.error(`  - ${p}`));
+      console.error('');
+      console.error('Default config allowedPaths:');
+      defaultConfig.security.allowedPaths.forEach(p => console.error(`  - ${p}`));
+      console.error('');
+      console.error('Merged result: [] (no overlap)');
+      console.error('');
+      console.error('EXPLANATION:');
+      console.error('The secure merge uses INTERSECTION for allowedPaths - paths must exist');
+      console.error('in BOTH the default config AND your user config. This prevents accidentally');
+      console.error('weakening security by adding overly broad paths.');
+      console.error('');
+      console.error('SOLUTIONS:');
+      console.error('1. Use absolute paths that overlap with defaults:');
+      console.error(`   - Current working directory: ${process.cwd()}`);
+      console.error(`   - User home directory: ${os.homedir()}`);
+      console.error('2. Disable path restrictions entirely (NOT recommended):');
+      console.error('   Set "restrictWorkingDirectory": false in your config');
+      console.error('3. Include default paths in your allowedPaths array');
+      console.error('');
+      console.error('='.repeat(80));
+      console.error('');
+    } else if (merged.security.allowedPaths.length < userProvidedPaths.length) {
+      // Some paths were filtered out - inform user
+      const defaultSet = new Set(defaultConfig.security.allowedPaths.map(p => p.toLowerCase()));
+      const filtered = userProvidedPaths.filter(p => !defaultSet.has(p.toLowerCase()));
+      console.error('');
+      console.error('ℹ️  INFO: Some allowedPaths were filtered during secure merge:');
+      console.error('');
+      console.error('Filtered paths (not in default config):');
+      filtered.forEach(p => console.error(`  - ${p}`));
+      console.error('');
+      console.error('Allowed paths (intersection with defaults):');
+      merged.security.allowedPaths.forEach(p => console.error(`  - ${p}`));
+      console.error('');
+    }
+  }
 
   // Ensure validatePath functions are preserved (they're functions, not serialized)
   for (const [key, shell] of Object.entries(merged.shells) as [keyof typeof merged.shells, ShellConfig][]) {

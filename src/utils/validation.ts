@@ -1,8 +1,72 @@
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import os from 'os';
 import type { ShellConfig } from '../types/config.js';
 const execAsync = promisify(exec);
+
+/**
+ * Interface for enhanced error message options
+ */
+export interface EnhancedErrorOptions {
+  what: string;              // What happened
+  why: string;               // Why it's blocked
+  howToFix: string[];        // Step-by-step remediation
+  warning?: string;          // Security warning (optional)
+  tip?: string;              // Additional tip (optional)
+  configPath?: string | null; // Path to config file
+}
+
+/**
+ * Format an enhanced error message with remediation guidance
+ */
+export function formatEnhancedError(options: EnhancedErrorOptions): string {
+  const lines: string[] = [];
+
+  // What happened
+  lines.push(options.what);
+  lines.push('');
+
+  // Why it's blocked
+  lines.push(`WHY: ${options.why}`);
+  lines.push('');
+
+  // How to fix
+  lines.push('TO FIX:');
+  options.howToFix.forEach((step, index) => {
+    lines.push(`${index + 1}. ${step}`);
+  });
+  lines.push('');
+
+  // Security warning if present
+  if (options.warning) {
+    lines.push(`WARNING: ${options.warning}`);
+    lines.push('');
+  }
+
+  // Tip if present
+  if (options.tip) {
+    lines.push(`TIP: ${options.tip}`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Get the config file location message
+ */
+export function getConfigLocationMessage(configPath: string | null): string {
+  if (configPath) {
+    return `Edit your config file: ${configPath}`;
+  }
+
+  const defaultLocations = [
+    path.join(process.cwd(), 'config.json'),
+    path.join(os.homedir(), '.win-cli-mcp', 'config.json')
+  ];
+
+  return `Create a config file at one of these locations:\n   - ${defaultLocations.join('\n   - ')}`;
+}
 
 export function extractCommandName(command: string): string {
     // Remove any path components
@@ -13,7 +77,7 @@ export function extractCommandName(command: string): string {
 
 export function isCommandBlocked(command: string, blockedCommands: string[]): boolean {
     const commandName = extractCommandName(command.toLowerCase());
-    return blockedCommands.some(blocked => 
+    return blockedCommands.some(blocked =>
         commandName === blocked.toLowerCase() ||
         commandName === `${blocked.toLowerCase()}.exe` ||
         commandName === `${blocked.toLowerCase()}.cmd` ||
@@ -21,12 +85,42 @@ export function isCommandBlocked(command: string, blockedCommands: string[]): bo
     );
 }
 
+/**
+ * Get the blocked command name for error messages
+ */
+export function getBlockedCommandName(command: string, blockedCommands: string[]): string | null {
+    const commandName = extractCommandName(command.toLowerCase());
+    for (const blocked of blockedCommands) {
+        if (commandName === blocked.toLowerCase() ||
+            commandName === `${blocked.toLowerCase()}.exe` ||
+            commandName === `${blocked.toLowerCase()}.cmd` ||
+            commandName === `${blocked.toLowerCase()}.bat`) {
+            return blocked;
+        }
+    }
+    return null;
+}
+
 export function isArgumentBlocked(args: string[], blockedArguments: string[]): boolean {
-    return args.some(arg => 
-        blockedArguments.some(blocked => 
+    return args.some(arg =>
+        blockedArguments.some(blocked =>
             new RegExp(`^${blocked}$`, 'i').test(arg)
         )
     );
+}
+
+/**
+ * Get the specific blocked argument for error messages
+ */
+export function getBlockedArgument(args: string[], blockedArguments: string[]): string | null {
+    for (const arg of args) {
+        for (const blocked of blockedArguments) {
+            if (new RegExp(`^${blocked}$`, 'i').test(arg)) {
+                return arg;
+            }
+        }
+    }
+    return null;
 }
 
 /**
@@ -46,10 +140,20 @@ export function containsDangerousCharacters(command: string): boolean {
 /**
  * Validates a command for a specific shell, checking for shell-specific blocked operators
  */
-export function validateShellOperators(command: string, shellConfig: ShellConfig): void {
+export function validateShellOperators(command: string, shellConfig: ShellConfig, configPath: string | null = null): void {
     // Check for dangerous control characters first
     if (containsDangerousCharacters(command)) {
-        throw new Error('Command contains dangerous control characters');
+        throw new Error(formatEnhancedError({
+            what: 'Command contains dangerous control characters.',
+            why: 'Control characters (null bytes, non-printable characters) can be used to bypass security checks or inject malicious commands.',
+            howToFix: [
+                'Remove any non-printable characters from your command',
+                'Ensure your command uses only standard ASCII characters',
+                'If you copied this command from somewhere, try retyping it manually'
+            ],
+            warning: 'Control character injection is a serious security risk. This check cannot be disabled.',
+            configPath
+        }));
     }
 
     // Skip validation if shell doesn't specify blocked operators
@@ -71,7 +175,19 @@ export function validateShellOperators(command: string, shellConfig: ShellConfig
     // Check for each operator explicitly (no regex escaping issues)
     for (const op of dangerousOperators) {
         if (command.includes(op)) {
-            throw new Error(`Command contains blocked operator: ${op}`);
+            const configLocationMsg = getConfigLocationMessage(configPath);
+            throw new Error(formatEnhancedError({
+                what: `Command contains blocked operator: '${op}'`,
+                why: 'Shell operators like |, &, ;, >, < can be used to chain commands, redirect output, or execute multiple commands. This is blocked to prevent command injection attacks.',
+                howToFix: [
+                    configLocationMsg,
+                    `Remove '${op}' from the "shells.{shellName}.blockedOperators" array`,
+                    'Restart the MCP server'
+                ],
+                warning: `Allowing '${op}' enables command chaining and could allow malicious code execution. Only allow if you trust all command sources.`,
+                tip: 'Use the check_security_config tool to view all blocked operators for each shell.',
+                configPath
+            }));
         }
     }
 
@@ -108,7 +224,18 @@ export function validateShellOperators(command: string, shellConfig: ShellConfig
     for (const [ascii, variants] of Object.entries(unicodeVariants)) {
         for (const variant of variants) {
             if (command.includes(variant)) {
-                throw new Error(`Command contains Unicode variant of blocked operator: ${ascii}`);
+                throw new Error(formatEnhancedError({
+                    what: `Command contains Unicode variant of blocked operator: '${ascii}' (detected: '${variant}')`,
+                    why: 'Attackers use Unicode lookalike characters (homoglyphs) to bypass security filters. These characters appear like normal operators but use different Unicode codepoints.',
+                    howToFix: [
+                        `Replace the Unicode character '${variant}' with the standard ASCII operator '${ascii}'`,
+                        'If this is a legitimate use case (e.g., displaying Unicode in output), consider using escape sequences or a different approach',
+                        'Retype the command manually instead of copying from untrusted sources'
+                    ],
+                    warning: 'Unicode homoglyph attacks are a known security vector. This protection cannot be disabled.',
+                    tip: 'If you copied this command from a document or web page, Unicode characters may have been substituted.',
+                    configPath
+                }));
             }
         }
     }
@@ -123,7 +250,18 @@ export function validateShellOperators(command: string, shellConfig: ShellConfig
 
     for (const char of zeroWidthChars) {
         if (command.includes(char)) {
-            throw new Error('Command contains zero-width characters');
+            throw new Error(formatEnhancedError({
+                what: 'Command contains zero-width characters.',
+                why: 'Zero-width characters are invisible but can be used to bypass security filters by splitting operators or commands. They are commonly inserted by malicious scripts.',
+                howToFix: [
+                    'Retype your command manually instead of copying it',
+                    'Use a text editor that shows invisible characters to identify and remove them',
+                    'If the command came from an untrusted source, verify its authenticity'
+                ],
+                warning: 'Zero-width character injection is a stealth attack vector. This protection cannot be disabled.',
+                tip: 'These characters are often invisible in normal text editors. Consider using a hex editor or developer tools to inspect your command.',
+                configPath
+            }));
         }
     }
 }
@@ -213,7 +351,7 @@ export function parseCommand(fullCommand: string): { command: string; args: stri
         const potentialCommand = commandTokens.join(' ');
 
         // Check if this could be a complete command path
-        if (/\.(exe|cmd|bat)$/i.test(potentialCommand) || 
+        if (/\.(exe|cmd|bat)$/i.test(potentialCommand) ||
             (!potentialCommand.includes('\\') && commandTokens.length === 1)) {
             return {
                 command: potentialCommand,
@@ -291,18 +429,18 @@ export function validateWorkingDirectory(dir: string, allowedPaths: string[]): v
 export function normalizeWindowsPath(inputPath: string): string {
     // Convert forward slashes to backslashes
     let normalized = inputPath.replace(/\//g, '\\');
-    
+
     // Handle Windows drive letter
     if (/^[a-zA-Z]:\\.+/.test(normalized)) {
         // Already in correct form
         return path.normalize(normalized);
     }
-    
+
     // Handle paths without drive letter
     if (normalized.startsWith('\\')) {
         // Assume C: drive if not specified
         normalized = `C:${normalized}`;
     }
-    
+
     return path.normalize(normalized);
 }

@@ -1,6 +1,7 @@
 import { Client } from 'ssh2';
 import { SSHConnectionConfig } from '../types/config.js';
 import fs from 'fs/promises';
+import { getKnownHostsManager } from './knownHosts.js';
 
 export class SSHConnection {
   private client: Client;
@@ -14,10 +15,12 @@ export class SSHConnection {
   private baseBackoffMs: number = 1000; // 1 second base delay
   private isFailed: boolean = false;
   private onFailureCallback?: () => void;
+  private strictHostKeyChecking: boolean;
 
-  constructor(config: SSHConnectionConfig, onFailure?: () => void) {
+  constructor(config: SSHConnectionConfig, strictHostKeyChecking: boolean = true, onFailure?: () => void) {
     this.client = new Client();
     this.config = config;
+    this.strictHostKeyChecking = strictHostKeyChecking;
     this.onFailureCallback = onFailure;
     this.setupClientEvents();
   }
@@ -114,6 +117,29 @@ export class SSHConnection {
         } else {
           throw new Error('No authentication method provided');
         }
+
+        // Add host key verification
+        const knownHostsManager = getKnownHostsManager();
+        connectionConfig.hostVerifier = async (key: Buffer, verify: (valid: boolean) => void) => {
+          try {
+            const result = await knownHostsManager.verifyHostKey(
+              this.config.host,
+              this.config.port,
+              undefined, // hashedKey - we're not using hostHash
+              key,
+              this.strictHostKeyChecking
+            );
+
+            if (!result.accepted) {
+              console.error(`Host key verification failed: ${result.reason}`);
+            }
+
+            verify(result.accepted);
+          } catch (error) {
+            console.error('Error during host key verification:', error instanceof Error ? error.message : String(error));
+            verify(false);
+          }
+        };
 
         this.client
           .on('ready', () => {
@@ -244,6 +270,11 @@ export class SSHConnectionPool {
   private lastAccessTime: Map<string, number> = new Map();
   private readonly maxPoolSize: number = 10;
   private readonly maxIdleTime: number = 30 * 60 * 1000; // 30 minutes
+  private strictHostKeyChecking: boolean;
+
+  constructor(strictHostKeyChecking: boolean = true) {
+    this.strictHostKeyChecking = strictHostKeyChecking;
+  }
 
   private evictIdleConnections(): void {
     const now = Date.now();
@@ -299,7 +330,7 @@ export class SSHConnectionPool {
       }
 
       // Create connection with failure callback
-      connection = new SSHConnection(config, () => {
+      connection = new SSHConnection(config, this.strictHostKeyChecking, () => {
         // Remove from pool when permanently failed
         this.closeConnection(connectionId).catch(err => {
           console.error(`Error removing failed connection ${connectionId}:`, err);

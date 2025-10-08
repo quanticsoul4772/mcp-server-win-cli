@@ -16,7 +16,11 @@ import {
   extractCommandName,
   validateShellOperators,
   canonicalizePath,
-  isPathAllowed
+  isPathAllowed,
+  getBlockedCommandName,
+  getBlockedArgument,
+  formatEnhancedError,
+  getConfigLocationMessage
 } from './utils/validation.js';
 import { spawn } from 'child_process';
 import { z } from 'zod';
@@ -56,12 +60,14 @@ class CLIServer {
   private blockedCommands: Set<string>;
   private commandHistory: CommandHistoryEntry[];
   private config: ServerConfig;
+  private configPath: string | null;
   private sshPool: SSHConnectionPool;
   private sessionManager: SessionManager;
   private historyCleanupTimer: NodeJS.Timeout | null = null;
 
-  constructor(config: ServerConfig) {
+  constructor(config: ServerConfig, configPath: string | null = null) {
     this.config = config;
+    this.configPath = configPath;
     this.server = new Server({
       name: "windows-cli-server",
       version: packageJson.version,
@@ -76,7 +82,7 @@ class CLIServer {
     this.allowedPaths = new Set(config.security.allowedPaths);
     this.blockedCommands = new Set(config.security.blockedCommands);
     this.commandHistory = [];
-    this.sshPool = new SSHConnectionPool();
+    this.sshPool = new SSHConnectionPool(config.ssh.strictHostKeyChecking);
     this.sessionManager = new SessionManager();
 
     this.setupHandlers();
@@ -107,14 +113,14 @@ class CLIServer {
     // Get shell-specific config
     const shellConfig = this.config.shells[shell];
 
-    // Use shell-specific operator validation
+    // Use shell-specific operator validation with configPath
     try {
-      validateShellOperators(command, shellConfig);
+      validateShellOperators(command, shellConfig, this.configPath);
     } catch (error) {
-      const blockedOps = shellConfig.blockedOperators?.join(', ') || 'none';
+      // validateShellOperators already provides enhanced error messages
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `Command contains blocked operator. Blocked operators: ${blockedOps}. Original error: ${error instanceof Error ? error.message : String(error)}`
+        error instanceof Error ? error.message : String(error)
       );
     }
 
@@ -122,22 +128,45 @@ class CLIServer {
 
     // Check for blocked commands
     if (isCommandBlocked(executable, Array.from(this.blockedCommands))) {
-      const cmdName = extractCommandName(executable);
-      const blockedList = Array.from(this.blockedCommands).slice(0, 10).join(', ');
-      const more = this.blockedCommands.size > 10 ? ` and ${this.blockedCommands.size - 10} more` : '';
+      const cmdName = getBlockedCommandName(executable, Array.from(this.blockedCommands)) || extractCommandName(executable);
+      const configLocationMsg = getConfigLocationMessage(this.configPath);
+
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `Command '${cmdName}' is blocked by security policy. Blocked commands: ${blockedList}${more}`
+        formatEnhancedError({
+          what: `Command '${cmdName}' is blocked by security policy.`,
+          why: 'This command can modify system state, delete files, or perform privileged operations. It is blocked by default to prevent accidental or malicious system damage.',
+          howToFix: [
+            configLocationMsg,
+            `Remove '${cmdName}' from the "security.blockedCommands" array`,
+            'Restart the MCP server'
+          ],
+          warning: `Allowing '${cmdName}' removes an important security protection. Ensure you understand the risks and trust all command sources before proceeding.`,
+          tip: 'Use the check_security_config tool to view all blocked commands.',
+          configPath: this.configPath
+        })
       );
     }
 
     // Check for blocked arguments
     if (isArgumentBlocked(args, this.config.security.blockedArguments)) {
-      const blockedArgs = this.config.security.blockedArguments.slice(0, 10).join(', ');
-      const more = this.config.security.blockedArguments.length > 10 ? ` and ${this.config.security.blockedArguments.length - 10} more` : '';
+      const blockedArg = getBlockedArgument(args, this.config.security.blockedArguments);
+      const configLocationMsg = getConfigLocationMessage(this.configPath);
+
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `One or more arguments are blocked by security policy. Blocked arguments: ${blockedArgs}${more}`
+        formatEnhancedError({
+          what: `Argument '${blockedArg}' is blocked by security policy.`,
+          why: 'This argument enables potentially dangerous command features like code execution, interactive shells, or system-level access. It is blocked to prevent command injection and privilege escalation attacks.',
+          howToFix: [
+            configLocationMsg,
+            `Remove the pattern matching '${blockedArg}' from the "security.blockedArguments" array`,
+            'Restart the MCP server'
+          ],
+          warning: `Allowing '${blockedArg}' could enable command injection or privilege escalation. Only allow if absolutely necessary and you trust all command sources.`,
+          tip: 'Use the check_security_config tool to view all blocked argument patterns.',
+          configPath: this.configPath
+        })
       );
     }
 
@@ -309,7 +338,7 @@ class CLIServer {
       tools: [
         {
           name: "execute_command",
-          description: `Execute a command in the specified shell (powershell, cmd, or gitbash)
+          description: `[Command Execution] Execute a command in the specified shell (powershell, cmd, or gitbash)
 
 Example usage (PowerShell):
 \`\`\`json
@@ -365,7 +394,7 @@ Example usage (Git Bash):
         },
         {
           name: "read_command_history",
-          description: `Get the history of executed commands
+          description: `[Command Execution] Get the history of executed commands
 
 Example usage:
 \`\`\`json
@@ -397,7 +426,7 @@ Example response:
         },
         {
           name: "ssh_execute",
-          description: `Execute a command on a remote host via SSH
+          description: `[SSH Operations] Execute a command on a remote host via SSH
 
 Example usage:
 \`\`\`json
@@ -441,7 +470,7 @@ Configuration required in config.json:
         },
         {
           name: "ssh_disconnect",
-          description: `Disconnect from an SSH server
+          description: `[SSH Operations] Disconnect from an SSH server
 
 Example usage:
 \`\`\`json
@@ -465,7 +494,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         },
         {
           name: "create_ssh_connection",
-          description: "Create a new SSH connection",
+          description: "[SSH Operations] Create a new SSH connection",
           inputSchema: {
             type: "object",
             properties: {
@@ -504,7 +533,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         },
         {
           name: "read_ssh_connections",
-          description: "Read all SSH connections",
+          description: "[SSH Operations] Read all SSH connections",
           inputSchema: {
             type: "object",
             properties: {} // No input parameters needed
@@ -512,7 +541,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         },
         {
           name: "update_ssh_connection",
-          description: "Update an existing SSH connection",
+          description: "[SSH Operations] Update an existing SSH connection",
           inputSchema: {
             type: "object",
             properties: {
@@ -551,7 +580,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         },
         {
           name: "delete_ssh_connection",
-          description: "Delete an existing SSH connection",
+          description: "[SSH Operations] Delete an existing SSH connection",
           inputSchema: {
             type: "object",
             properties: {
@@ -565,7 +594,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         },
         {
           name: "read_current_directory",
-          description: "Get the current working directory",
+          description: "[System Info] Get the current working directory",
           inputSchema: {
             type: "object",
             properties: {} // No input parameters needed
@@ -573,7 +602,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         },
         {
           name: "read_ssh_pool_status",
-          description: "Get the status and health of the SSH connection pool",
+          description: "[SSH Operations] Get the status and health of the SSH connection pool",
           inputSchema: {
             type: "object",
             properties: {} // No input parameters needed
@@ -581,7 +610,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         },
         {
           name: "check_security_config",
-          description: "Get current security configuration including blocked commands, allowed paths, and restrictions",
+          description: "[Diagnostics] Get current security configuration including blocked commands, allowed paths, and restrictions. Use this to troubleshoot why commands are being blocked.",
           inputSchema: {
             type: "object",
             properties: {
@@ -595,7 +624,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         },
         {
           name: "validate_command",
-          description: "Check if a command would be allowed without executing it (dry-run validation)",
+          description: "[Diagnostics] Test if a command would be allowed without executing it (dry-run validation). Use this to troubleshoot security blocks before attempting execution.",
           inputSchema: {
             type: "object",
             properties: {
@@ -620,7 +649,7 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
         },
         {
           name: "validate_ssh_connection",
-          description: "Validate SSH connection configuration and test connectivity",
+          description: "[SSH Operations] Validate SSH connection configuration and test connectivity",
           inputSchema: {
             type: "object",
             properties: {
@@ -730,11 +759,25 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
 
               if (this.config.security.restrictWorkingDirectory) {
                 if (!isPathAllowed(realPath, Array.from(this.allowedPaths))) {
-                  const allowedList = Array.from(this.allowedPaths).slice(0, 5).join(', ');
-                  const more = this.allowedPaths.size > 5 ? ` and ${this.allowedPaths.size - 5} more` : '';
+                  const allowedList = Array.from(this.allowedPaths).map(p => `\n   - ${p}`).join('');
+                  const configLocationMsg = getConfigLocationMessage(this.configPath);
+
                   throw new McpError(
                     ErrorCode.InvalidRequest,
-                    `Working directory '${realPath}' is not in allowed paths. Allowed paths: ${allowedList}${more}. To modify, update config.json: security.allowedPaths or set security.restrictWorkingDirectory to false.`
+                    formatEnhancedError({
+                      what: `Working directory '${realPath}' is not in allowed paths.`,
+                      why: 'Path restrictions prevent commands from executing in untrusted directories. This protects against directory traversal attacks and limits the scope of potential damage.',
+                      howToFix: [
+                        configLocationMsg,
+                        `Add '${realPath}' to the "security.allowedPaths" array`,
+                        'Note: The config uses secure merge - paths must exist in BOTH default and user config',
+                        'Alternative: Set "security.restrictWorkingDirectory" to false (NOT recommended)',
+                        'Restart the MCP server'
+                      ],
+                      warning: 'Adding broad paths (like C:\\) weakens security. Only add specific directories you need to access.',
+                      tip: `Current allowed paths:${allowedList}\n\nUse absolute paths. The secure merge uses intersection, so new paths must overlap with defaults (current working directory or home directory).`,
+                      configPath: this.configPath
+                    })
                   );
                 }
               }
@@ -1314,9 +1357,9 @@ const main = async () => {
     }
 
     // Load configuration
-    const config = loadConfig(args.config);
+    const { config, configPath } = loadConfig(args.config);
     
-    const server = new CLIServer(config);
+    const server = new CLIServer(config, configPath);
     await server.run();
   } catch (error) {
     console.error("Fatal error:", error);

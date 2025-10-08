@@ -11,7 +11,8 @@ import { SSHConnectionConfigSchema } from '../types/schemas.js';
 const loadConfig = (): ServerConfig => {
   try {
     // Use the same config file that the main application uses
-    return loadMainConfig();
+    const { config } = loadMainConfig();
+    return config;
   } catch (error) {
     console.error('Error loading configuration:', error);
     throw error;
