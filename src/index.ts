@@ -691,15 +691,12 @@ Example usage:
             const shellKey = args.shell as keyof typeof this.config.shells;
             const shellConfig = this.config.shells[shellKey];
 
-            // Use file descriptor approach to prevent TOCTOU race condition
-            let workingDirFd: number | null = null;
+            // Validate working directory to prevent TOCTOU race condition
             try {
-              // Open directory to get file descriptor
               const fs = await import('fs');
-              workingDirFd = fs.openSync(workingDir, fs.constants.O_RDONLY);
 
-              // Verify it's a directory using the file descriptor
-              const stats = fs.fstatSync(workingDirFd);
+              // Verify directory exists and is accessible
+              const stats = fs.statSync(workingDir);
               if (!stats.isDirectory()) {
                 throw new McpError(
                   ErrorCode.InvalidRequest,
@@ -707,7 +704,7 @@ Example usage:
                 );
               }
 
-              // Get the real path from the file descriptor (prevents symlink attacks)
+              // Get the real path (prevents symlink attacks)
               const realPath = fs.realpathSync(workingDir);
 
               if (this.config.security.restrictWorkingDirectory) {
@@ -722,10 +719,6 @@ Example usage:
               // Use the verified real path for execution
               workingDir = realPath;
             } catch (err) {
-              if (workingDirFd !== null) {
-                const fs = await import('fs');
-                fs.closeSync(workingDirFd);
-              }
               if (err instanceof McpError) {
                 throw err;
               }
@@ -733,11 +726,6 @@ Example usage:
                 ErrorCode.InvalidRequest,
                 `Invalid working directory: ${createUserFriendlyError(err)}`
               );
-            } finally {
-              if (workingDirFd !== null) {
-                const fs = await import('fs');
-                fs.closeSync(workingDirFd);
-              }
             }
 
             // Execute command
