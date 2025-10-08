@@ -108,31 +108,44 @@ class CLIServer {
     const shellConfig = this.config.shells[shell];
 
     // Use shell-specific operator validation
-    validateShellOperators(command, shellConfig);
-  
+    try {
+      validateShellOperators(command, shellConfig);
+    } catch (error) {
+      const blockedOps = shellConfig.blockedOperators?.join(', ') || 'none';
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `Command contains blocked operator. Blocked operators: ${blockedOps}. Original error: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+
     const { command: executable, args } = parseCommand(command);
-  
+
     // Check for blocked commands
     if (isCommandBlocked(executable, Array.from(this.blockedCommands))) {
+      const cmdName = extractCommandName(executable);
+      const blockedList = Array.from(this.blockedCommands).slice(0, 10).join(', ');
+      const more = this.blockedCommands.size > 10 ? ` and ${this.blockedCommands.size - 10} more` : '';
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `Command is blocked: "${extractCommandName(executable)}"`
+        `Command '${cmdName}' is blocked by security policy. Blocked commands: ${blockedList}${more}`
       );
     }
-  
+
     // Check for blocked arguments
     if (isArgumentBlocked(args, this.config.security.blockedArguments)) {
+      const blockedArgs = this.config.security.blockedArguments.slice(0, 10).join(', ');
+      const more = this.config.security.blockedArguments.length > 10 ? ` and ${this.config.security.blockedArguments.length - 10} more` : '';
       throw new McpError(
         ErrorCode.InvalidRequest,
-        'One or more arguments are blocked. Check configuration for blocked patterns.'
+        `One or more arguments are blocked by security policy. Blocked arguments: ${blockedArgs}${more}`
       );
     }
-  
+
     // Validate command length
     if (command.length > this.config.security.maxCommandLength) {
       throw new McpError(
         ErrorCode.InvalidRequest,
-        `Command exceeds maximum length of ${this.config.security.maxCommandLength}`
+        `Command exceeds maximum length of ${this.config.security.maxCommandLength} characters (current: ${command.length})`
       );
     }
   }
@@ -567,6 +580,45 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
           }
         },
         {
+          name: "check_security_config",
+          description: "Get current security configuration including blocked commands, allowed paths, and restrictions",
+          inputSchema: {
+            type: "object",
+            properties: {
+              category: {
+                type: "string",
+                enum: ["all", "commands", "paths", "operators", "limits"],
+                description: "Filter by configuration category (optional, default: all)"
+              }
+            }
+          }
+        },
+        {
+          name: "validate_command",
+          description: "Check if a command would be allowed without executing it (dry-run validation)",
+          inputSchema: {
+            type: "object",
+            properties: {
+              shell: {
+                type: "string",
+                enum: Object.keys(this.config.shells).filter(shell =>
+                  this.config.shells[shell as keyof typeof this.config.shells].enabled
+                ),
+                description: "Shell to validate against"
+              },
+              command: {
+                type: "string",
+                description: "Command to validate"
+              },
+              workingDir: {
+                type: "string",
+                description: "Working directory to validate (optional)"
+              }
+            },
+            required: ["shell", "command"]
+          }
+        },
+        {
           name: "validate_ssh_connection",
           description: "Validate SSH connection configuration and test connectivity",
           inputSchema: {
@@ -602,64 +654,6 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
             required: ["connectionConfig"]
           }
         },
-        {
-          name: "execute_batch",
-          description: `Execute multiple commands across different shells and SSH connections
-
-Example usage:
-\`\`\`json
-{
-  "commands": [
-    {"shell": "powershell", "command": "Get-Process"},
-    {"connectionId": "server1", "command": "ps aux"},
-    {"shell": "cmd", "command": "dir"}
-  ],
-  "strategy": "sequential",
-  "stopOnError": true
-}
-\`\`\``,
-          inputSchema: {
-            type: "object",
-            properties: {
-              commands: {
-                type: "array",
-                description: "Array of commands to execute",
-                items: {
-                  type: "object",
-                  properties: {
-                    shell: {
-                      type: "string",
-                      description: "Shell to use (mutually exclusive with connectionId)"
-                    },
-                    connectionId: {
-                      type: "string",
-                      description: "SSH connection ID (mutually exclusive with shell)"
-                    },
-                    command: {
-                      type: "string",
-                      description: "Command to execute"
-                    },
-                    workingDir: {
-                      type: "string",
-                      description: "Working directory (local commands only)"
-                    }
-                  },
-                  required: ["command"]
-                }
-              },
-              strategy: {
-                type: "string",
-                enum: ["sequential", "parallel"],
-                description: "Execution strategy (default: sequential)"
-              },
-              stopOnError: {
-                type: "boolean",
-                description: "Stop execution if a command fails (default: true)"
-              }
-            },
-            required: ["commands"]
-          }
-        }
       ]
     }));
 
@@ -668,17 +662,44 @@ Example usage:
       try {
         switch (request.params.name) {
           case "execute_command": {
-            const args = z.object({
-              shell: z.enum(Object.keys(this.config.shells).filter(shell =>
-                this.config.shells[shell as keyof typeof this.config.shells].enabled
-              ) as [string, ...string[]]),
-              command: z.string(),
-              workingDir: z.string().optional(),
-              timeout: z.number().positive().optional()
-            }).parse(request.params.arguments);
+            let args;
+            try {
+              args = z.object({
+                shell: z.enum(Object.keys(this.config.shells).filter(shell =>
+                  this.config.shells[shell as keyof typeof this.config.shells].enabled
+                ) as [string, ...string[]]),
+                command: z.string(),
+                workingDir: z.string().optional(),
+                timeout: z.number().positive().optional()
+              }).parse(request.params.arguments);
+            } catch (err) {
+              if (err instanceof z.ZodError) {
+                const availableShells = Object.keys(this.config.shells).filter(shell =>
+                  this.config.shells[shell as keyof typeof this.config.shells].enabled
+                ).join(', ');
+                throw new McpError(
+                  ErrorCode.InvalidParams,
+                  `Invalid parameters. Available shells: ${availableShells}. ${err.errors.map(e => e.message).join(', ')}`
+                );
+              }
+              throw err;
+            }
 
             // Validate command
-            this.validateCommand(args.shell as keyof ServerConfig['shells'], args.command);
+            try {
+              this.validateCommand(args.shell as keyof ServerConfig['shells'], args.command);
+            } catch (error) {
+              // Log validation failures to history
+              if (this.config.security.logCommands && error instanceof McpError) {
+                this.addToHistory({
+                  command: args.command,
+                  output: `BLOCKED: ${error.message}`,
+                  timestamp: new Date().toISOString(),
+                  exitCode: -2 // -2 = validation failure
+                });
+              }
+              throw error;
+            }
 
             // Validate and canonicalize working directory if provided
             let workingDir = args.workingDir ?
@@ -709,9 +730,11 @@ Example usage:
 
               if (this.config.security.restrictWorkingDirectory) {
                 if (!isPathAllowed(realPath, Array.from(this.allowedPaths))) {
+                  const allowedList = Array.from(this.allowedPaths).slice(0, 5).join(', ');
+                  const more = this.allowedPaths.size > 5 ? ` and ${this.allowedPaths.size - 5} more` : '';
                   throw new McpError(
                     ErrorCode.InvalidRequest,
-                    `Working directory outside allowed paths. Consult the server admin for configuration changes (config.json - restrictWorkingDirectory, allowedPaths).`
+                    `Working directory '${realPath}' is not in allowed paths. Allowed paths: ${allowedList}${more}. To modify, update config.json: security.allowedPaths or set security.restrictWorkingDirectory to false.`
                   );
                 }
               }
@@ -821,7 +844,9 @@ Example usage:
               const timeoutSeconds = args.timeout || this.config.security.commandTimeout;
               const timeout = setTimeout(() => {
                 shellProcess.kill();
-                const timeoutMessage = `Command execution timed out after ${timeoutSeconds} seconds.`;
+                const timeoutMessage = args.timeout
+                  ? `Command execution timed out after ${timeoutSeconds} seconds (custom timeout).`
+                  : `Command execution timed out after ${timeoutSeconds} seconds (default timeout). Use 'timeout' parameter to extend.`;
                 if (this.config.security.logCommands) {
                   this.addToHistory({
                     command: args.command,
@@ -1036,7 +1061,7 @@ Example usage:
             if (!this.config.ssh.enabled) {
               throw new McpError(
                 ErrorCode.InvalidRequest,
-                "SSH support is disabled in configuration"
+                "SSH support is disabled in server configuration. To enable: set ssh.enabled = true in config.json"
               );
             }
 
@@ -1045,6 +1070,115 @@ Example usage:
               content: [{
                 type: 'text',
                 text: JSON.stringify(poolStats, null, 2)
+              }]
+            };
+          }
+
+          case 'check_security_config': {
+            const args = z.object({
+              category: z.enum(['all', 'commands', 'paths', 'operators', 'limits']).optional().default('all')
+            }).parse(request.params.arguments);
+
+            const config: any = {};
+
+            if (args.category === 'all' || args.category === 'commands') {
+              config.blocked_commands = Array.from(this.blockedCommands);
+              config.blocked_arguments = this.config.security.blockedArguments;
+            }
+
+            if (args.category === 'all' || args.category === 'paths') {
+              config.allowed_paths = Array.from(this.allowedPaths);
+              config.restrict_working_directory = this.config.security.restrictWorkingDirectory;
+            }
+
+            if (args.category === 'all' || args.category === 'operators') {
+              config.blocked_operators = {
+                powershell: this.config.shells.powershell.blockedOperators || [],
+                cmd: this.config.shells.cmd.blockedOperators || [],
+                gitbash: this.config.shells.gitbash.blockedOperators || []
+              };
+            }
+
+            if (args.category === 'all' || args.category === 'limits') {
+              config.command_timeout_seconds = this.config.security.commandTimeout;
+              config.max_command_length = this.config.security.maxCommandLength;
+              config.max_history_size = this.config.security.maxHistorySize;
+              config.log_commands = this.config.security.logCommands;
+            }
+
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify(config, null, 2)
+              }]
+            };
+          }
+
+          case 'validate_command': {
+            const args = z.object({
+              shell: z.string(),
+              command: z.string(),
+              workingDir: z.string().optional()
+            }).parse(request.params.arguments);
+
+            const result: any = {
+              valid: true,
+              checks: {
+                command_blocked: false,
+                operator_blocked: false,
+                argument_blocked: false,
+                path_allowed: true,
+                length_ok: true
+              },
+              warnings: [],
+              errors: []
+            };
+
+            // Validate command without executing
+            try {
+              this.validateCommand(args.shell as keyof ServerConfig['shells'], args.command);
+            } catch (error) {
+              result.valid = false;
+              if (error instanceof McpError) {
+                result.errors.push(error.message);
+                // Parse error type
+                if (error.message.includes('blocked by security policy')) {
+                  if (error.message.includes('Blocked commands:')) {
+                    result.checks.command_blocked = true;
+                  } else if (error.message.includes('Blocked arguments:')) {
+                    result.checks.argument_blocked = true;
+                  }
+                } else if (error.message.includes('blocked operator')) {
+                  result.checks.operator_blocked = true;
+                } else if (error.message.includes('maximum length')) {
+                  result.checks.length_ok = false;
+                }
+              }
+            }
+
+            // Check working directory if provided
+            if (args.workingDir) {
+              try {
+                const fs = await import('fs');
+                const realPath = fs.realpathSync(args.workingDir);
+                if (this.config.security.restrictWorkingDirectory) {
+                  if (!isPathAllowed(realPath, Array.from(this.allowedPaths))) {
+                    result.valid = false;
+                    result.checks.path_allowed = false;
+                    result.errors.push(`Working directory '${realPath}' is not in allowed paths`);
+                  }
+                }
+              } catch (err) {
+                result.valid = false;
+                result.checks.path_allowed = false;
+                result.errors.push(`Invalid working directory: ${createUserFriendlyError(err)}`);
+              }
+            }
+
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify(result, null, 2)
               }]
             };
           }
@@ -1105,14 +1239,6 @@ Example usage:
                 isError: true
               };
             }
-          }
-
-          case 'execute_batch': {
-            // Note: Batch execution placeholder - clients should call tools individually for now
-            throw new McpError(
-              ErrorCode.MethodNotFound,
-              'execute_batch is not yet implemented - please call execute_command and ssh_execute separately'
-            );
           }
 
           default:
