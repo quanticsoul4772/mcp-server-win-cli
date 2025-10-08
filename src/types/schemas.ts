@@ -41,7 +41,7 @@ export const SecurityConfigSchema = z.object({
   logCommands: z.boolean(),
   maxHistorySize: z.number().int().positive(),
   commandTimeout: z.number().int().positive(),
-  enableInjectionProtection: z.boolean(),
+  // enableInjectionProtection removed - always enforced
 });
 
 // SSH Config Schema

@@ -7,8 +7,8 @@ const execAsync = promisify(exec);
 export function extractCommandName(command: string): string {
     // Remove any path components
     const basename = path.basename(command);
-    // Remove extension
-    return basename.replace(/\.(exe|cmd|bat)$/i, '').toLowerCase();
+    // Remove dangerous extensions (expanded to include script types)
+    return basename.replace(/\.(exe|cmd|bat|ps1|vbs|js|com|scr|msi|pif|wsf|hta)$/i, '').toLowerCase();
 }
 
 export function isCommandBlocked(command: string, blockedCommands: string[]): boolean {

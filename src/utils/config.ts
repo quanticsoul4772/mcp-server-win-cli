@@ -28,8 +28,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
     restrictWorkingDirectory: true,
     logCommands: true,
     maxHistorySize: 1000,
-    commandTimeout: 30,
-    enableInjectionProtection: true
+    commandTimeout: 30
   },
   shells: {
     powershell: {
@@ -108,8 +107,7 @@ function mergeConfigs(defaultConfig: ServerConfig, userConfig: Partial<ServerCon
     'security.restrictWorkingDirectory',
     'security.logCommands',
     'security.maxHistorySize',
-    'security.commandTimeout',
-    'security.enableInjectionProtection'
+    'security.commandTimeout'
   ];
 
   // Define restrictive array keys (use intersection to prevent weakening)

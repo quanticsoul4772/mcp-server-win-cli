@@ -7,7 +7,7 @@ export interface SecurityConfig {
   logCommands: boolean;
   maxHistorySize: number;
   commandTimeout: number;
-  enableInjectionProtection: boolean;
+  // enableInjectionProtection removed - always enforced for security
 }
 
 export interface ShellConfig {
@@ -18,11 +18,20 @@ export interface ShellConfig {
   blockedOperators?: string[]; // Added for shell-specific operator restrictions
 }
 
+/**
+ * SSH connection configuration
+ *
+ * @remarks
+ * At least one authentication method (password or privateKeyPath) is required.
+ * This constraint is enforced at runtime by SSHConnectionConfigSchema validation.
+ */
 export interface SSHConnectionConfig {
   host: string;
   port: number;
   username: string;
+  /** Path to SSH private key file. Required if password is not provided. */
   privateKeyPath?: string;
+  /** Password for SSH authentication. Required if privateKeyPath is not provided. */
   password?: string;
   keepaliveInterval?: number;
   keepaliveCountMax?: number;

@@ -100,14 +100,12 @@ class CLIServer {
   }
 
   private validateCommand(shell: keyof ServerConfig['shells'], command: string): void {
-    // Check for command chaining/injection attempts if enabled
-    if (this.config.security.enableInjectionProtection) {
-      // Get shell-specific config
-      const shellConfig = this.config.shells[shell];
-      
-      // Use shell-specific operator validation
-      validateShellOperators(command, shellConfig);
-    }
+    // Check for command chaining/injection attempts (always enforced)
+    // Get shell-specific config
+    const shellConfig = this.config.shells[shell];
+
+    // Use shell-specific operator validation
+    validateShellOperators(command, shellConfig);
   
     const { command: executable, args } = parseCommand(command);
   
