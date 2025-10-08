@@ -742,6 +742,15 @@ Use this to cleanly close SSH connections when they're no longer needed.`,
               // Use the verified real path for execution
               workingDir = realPath;
             } catch (err) {
+              // Log path validation failures to history
+              if (this.config.security.logCommands && err instanceof McpError) {
+                this.addToHistory({
+                  command: args.command,
+                  output: `BLOCKED: ${err.message}`,
+                  timestamp: new Date().toISOString(),
+                  exitCode: -2 // -2 = validation failure
+                });
+              }
               if (err instanceof McpError) {
                 throw err;
               }
