@@ -10,7 +10,12 @@ import {
   normalizeWindowsPath,
   validateShellOperators,
   containsDangerousCharacters,
-  canonicalizePath
+  canonicalizePath,
+  normalizeUnicode,
+  detectPowerShellUnicodeQuotes,
+  detectBidiControlCharacters,
+  detectSuspiciousCombiningCharacters,
+  detectInvisibleUnicodeCharacters
 } from '../src/utils/validation.js';
 import type { ShellConfig } from '../src/types/config.js';
 
@@ -293,5 +298,304 @@ describe('Enhanced Security Validation (v0.3.0)', () => {
   test('blocks zero-width characters', () => {
     expect(() => validateShellOperators('cmd\u200Becho', shellConfig)).toThrow('zero-width');
     expect(() => validateShellOperators('cmd\uFEFFecho', shellConfig)).toThrow('zero-width');
+  });
+});
+
+describe('Enhanced Unicode Security (v0.4.0)', () => {
+  const shellConfig: ShellConfig = {
+    enabled: true,
+    command: 'powershell.exe',
+    args: ['-Command'],
+    blockedOperators: ['&', '|', ';', '`', '>', '<']
+  };
+
+  describe('PowerShell Unicode Quote Detection', () => {
+    test('blocks U+201C LEFT DOUBLE QUOTATION MARK', () => {
+      expect(() => validateShellOperators('Write-Host \u201CHello\u201D', shellConfig))
+        .toThrow('PowerShell Unicode quote');
+    });
+
+    test('blocks U+201D RIGHT DOUBLE QUOTATION MARK', () => {
+      expect(() => validateShellOperators('Get-Process \u201D', shellConfig))
+        .toThrow('PowerShell Unicode quote');
+    });
+
+    test('blocks U+2018 LEFT SINGLE QUOTATION MARK', () => {
+      expect(() => validateShellOperators('Write-Host \u2018Hello\u2019', shellConfig))
+        .toThrow('PowerShell Unicode quote');
+    });
+
+    test('blocks U+2019 RIGHT SINGLE QUOTATION MARK', () => {
+      expect(() => validateShellOperators('Get-Item \u2019test\u2019', shellConfig))
+        .toThrow('PowerShell Unicode quote');
+    });
+
+    test('blocks U+2033 DOUBLE PRIME', () => {
+      expect(() => validateShellOperators('cmd \u2033test\u2033', shellConfig))
+        .toThrow('PowerShell Unicode quote');
+    });
+
+    test('blocks U+2032 PRIME', () => {
+      expect(() => validateShellOperators('cmd \u2032test\u2032', shellConfig))
+        .toThrow('PowerShell Unicode quote');
+    });
+
+    test('allows standard ASCII quotes', () => {
+      expect(() => validateShellOperators('Write-Host "Hello"', shellConfig))
+        .not.toThrow();
+      expect(() => validateShellOperators("Write-Host 'Hello'", shellConfig))
+        .not.toThrow();
+    });
+  });
+
+  describe('BiDi Control Character Detection (CVE-2021-42574)', () => {
+    test('blocks U+202E RIGHT-TO-LEFT OVERRIDE (RLO)', () => {
+      expect(() => validateShellOperators('cmd \u202E test', shellConfig))
+        .toThrow('BiDi');
+      expect(() => validateShellOperators('cmd \u202E test', shellConfig))
+        .toThrow('CVE-2021-42574');
+    });
+
+    test('blocks U+202D LEFT-TO-RIGHT OVERRIDE (LRO)', () => {
+      expect(() => validateShellOperators('cmd \u202D test', shellConfig))
+        .toThrow('BiDi');
+    });
+
+    test('blocks U+202A LEFT-TO-RIGHT EMBEDDING (LRE)', () => {
+      expect(() => validateShellOperators('cmd \u202A test', shellConfig))
+        .toThrow('BiDi');
+    });
+
+    test('blocks U+202B RIGHT-TO-LEFT EMBEDDING (RLE)', () => {
+      expect(() => validateShellOperators('cmd \u202B test', shellConfig))
+        .toThrow('BiDi');
+    });
+
+    test('blocks U+202C POP DIRECTIONAL FORMATTING (PDF)', () => {
+      expect(() => validateShellOperators('cmd \u202C test', shellConfig))
+        .toThrow('BiDi');
+    });
+
+    test('blocks U+2066 LEFT-TO-RIGHT ISOLATE (LRI)', () => {
+      expect(() => validateShellOperators('cmd \u2066 test', shellConfig))
+        .toThrow('BiDi');
+    });
+
+    test('blocks U+2067 RIGHT-TO-LEFT ISOLATE (RLI)', () => {
+      expect(() => validateShellOperators('cmd \u2067 test', shellConfig))
+        .toThrow('BiDi');
+    });
+
+    test('blocks U+2068 FIRST STRONG ISOLATE (FSI)', () => {
+      expect(() => validateShellOperators('cmd \u2068 test', shellConfig))
+        .toThrow('BiDi');
+    });
+
+    test('blocks U+2069 POP DIRECTIONAL ISOLATE (PDI)', () => {
+      expect(() => validateShellOperators('cmd \u2069 test', shellConfig))
+        .toThrow('BiDi');
+    });
+
+    test('error message references Trojan Source attack', () => {
+      expect(() => validateShellOperators('cmd \u202E malicious', shellConfig))
+        .toThrow('Trojan Source');
+    });
+  });
+
+  describe('Combining Character Detection', () => {
+    test('blocks combining diacritical marks (U+0300-U+036F)', () => {
+      expect(() => validateShellOperators('cmd\u0301 test', shellConfig))
+        .toThrow('combining');
+    });
+
+    test('blocks combining marks for symbols (U+20D0-U+20FF)', () => {
+      expect(() => validateShellOperators('cmd\u20D0 test', shellConfig))
+        .toThrow('combining');
+    });
+
+    test('allows normal accented characters (pre-composed)', () => {
+      expect(() => validateShellOperators('Write-Host café', shellConfig))
+        .not.toThrow();
+    });
+  });
+
+  describe('Invisible Unicode Character Detection', () => {
+    test('blocks variation selectors', () => {
+      expect(() => validateShellOperators('cmd\uFE00 test', shellConfig))
+        .toThrow('invisible');
+      expect(() => validateShellOperators('cmd\uFE0F test', shellConfig))
+        .toThrow('invisible');
+    });
+
+    test('blocks word joiner (U+2060)', () => {
+      expect(() => validateShellOperators('cmd\u2060test', shellConfig))
+        .toThrow('invisible');
+    });
+
+    test('blocks invisible times/separator/plus', () => {
+      expect(() => validateShellOperators('cmd\u2062test', shellConfig))
+        .toThrow('invisible');
+      expect(() => validateShellOperators('cmd\u2063test', shellConfig))
+        .toThrow('invisible');
+      expect(() => validateShellOperators('cmd\u2064test', shellConfig))
+        .toThrow('invisible');
+    });
+
+    test('blocks soft hyphen (U+00AD)', () => {
+      expect(() => validateShellOperators('cmd\u00ADtest', shellConfig))
+        .toThrow('invisible');
+    });
+
+    test('blocks Arabic form shaping controls', () => {
+      expect(() => validateShellOperators('cmd\u206C test', shellConfig))
+        .toThrow('invisible');
+      expect(() => validateShellOperators('cmd\u206D test', shellConfig))
+        .toThrow('invisible');
+    });
+  });
+
+  describe('Unicode Normalization', () => {
+    test('normalizes text before validation', () => {
+      // The normalization happens first, so decomposed forms are normalized
+      // to composed forms before validation. This means legitimate accented
+      // text works correctly.
+      const decomposed = 'cafe\u0301'; // café with combining accent
+
+      // After normalization, this becomes composed form and is allowed
+      expect(() => validateShellOperators(decomposed, shellConfig))
+        .not.toThrow();
+
+      // But standalone combining characters (not part of valid composition) are still blocked
+      expect(() => validateShellOperators('cmd\u0301', shellConfig))
+        .toThrow('combining');
+    });
+  });
+
+  describe('Multiple Unicode Attack Vectors', () => {
+    test('detects first Unicode threat in order', () => {
+      // PowerShell quote should be detected before BiDi
+      expect(() => validateShellOperators('\u201C\u202E test', shellConfig))
+        .toThrow('PowerShell Unicode quote');
+    });
+
+    test('comprehensive attack command is blocked', () => {
+      const malicious = 'Get-Process \u201D\u202E\u200B; rm -rf /';
+      expect(() => validateShellOperators(malicious, shellConfig))
+        .toThrow();
+    });
+  });
+});
+
+describe('Unicode Detection Functions (v0.4.0)', () => {
+  describe('normalizeUnicode', () => {
+    test('normalizes text to NFC form', () => {
+      const decomposed = 'cafe\u0301'; // café with combining accent
+      const composed = 'café'; // café as single character
+      expect(normalizeUnicode(decomposed)).toBe(normalizeUnicode(composed));
+    });
+
+    test('handles empty strings', () => {
+      expect(normalizeUnicode('')).toBe('');
+    });
+
+    test('handles ASCII text unchanged', () => {
+      expect(normalizeUnicode('hello world')).toBe('hello world');
+    });
+  });
+
+  describe('detectPowerShellUnicodeQuotes', () => {
+    test('detects left double quotation mark', () => {
+      const result = detectPowerShellUnicodeQuotes('test \u201C quote');
+      expect(result.detected).toBe(true);
+      expect(result.codepoint).toContain('U+201C');
+    });
+
+    test('detects right double quotation mark', () => {
+      const result = detectPowerShellUnicodeQuotes('test \u201D quote');
+      expect(result.detected).toBe(true);
+      expect(result.codepoint).toContain('U+201D');
+    });
+
+    test('detects single quotation marks', () => {
+      expect(detectPowerShellUnicodeQuotes('test \u2018 quote').detected).toBe(true);
+      expect(detectPowerShellUnicodeQuotes('test \u2019 quote').detected).toBe(true);
+    });
+
+    test('returns false for normal quotes', () => {
+      const result = detectPowerShellUnicodeQuotes('test "normal" quote');
+      expect(result.detected).toBe(false);
+    });
+  });
+
+  describe('detectBidiControlCharacters', () => {
+    test('detects RIGHT-TO-LEFT OVERRIDE', () => {
+      const result = detectBidiControlCharacters('test \u202E malicious');
+      expect(result.detected).toBe(true);
+      expect(result.codepoint).toContain('U+202E');
+      expect(result.codepoint).toContain('RLO');
+    });
+
+    test('detects all BiDi control characters', () => {
+      expect(detectBidiControlCharacters('test \u202D').detected).toBe(true); // LRO
+      expect(detectBidiControlCharacters('test \u202A').detected).toBe(true); // LRE
+      expect(detectBidiControlCharacters('test \u202B').detected).toBe(true); // RLE
+      expect(detectBidiControlCharacters('test \u202C').detected).toBe(true); // PDF
+      expect(detectBidiControlCharacters('test \u2066').detected).toBe(true); // LRI
+      expect(detectBidiControlCharacters('test \u2067').detected).toBe(true); // RLI
+      expect(detectBidiControlCharacters('test \u2068').detected).toBe(true); // FSI
+      expect(detectBidiControlCharacters('test \u2069').detected).toBe(true); // PDI
+    });
+
+    test('returns false for normal text', () => {
+      const result = detectBidiControlCharacters('normal command');
+      expect(result.detected).toBe(false);
+    });
+  });
+
+  describe('detectSuspiciousCombiningCharacters', () => {
+    test('detects combining diacritical marks', () => {
+      const result = detectSuspiciousCombiningCharacters('test\u0301');
+      expect(result.detected).toBe(true);
+      expect(result.position).toBe(4);
+    });
+
+    test('detects combining marks for symbols', () => {
+      const result = detectSuspiciousCombiningCharacters('test\u20D0');
+      expect(result.detected).toBe(true);
+    });
+
+    test('returns false for pre-composed characters', () => {
+      const result = detectSuspiciousCombiningCharacters('café'); // é is pre-composed
+      expect(result.detected).toBe(false);
+    });
+
+    test('returns false for normal ASCII', () => {
+      const result = detectSuspiciousCombiningCharacters('normal text');
+      expect(result.detected).toBe(false);
+    });
+  });
+
+  describe('detectInvisibleUnicodeCharacters', () => {
+    test('detects variation selectors', () => {
+      expect(detectInvisibleUnicodeCharacters('test\uFE00').detected).toBe(true);
+      expect(detectInvisibleUnicodeCharacters('test\uFE0F').detected).toBe(true);
+    });
+
+    test('detects word joiner and invisible operators', () => {
+      expect(detectInvisibleUnicodeCharacters('test\u2060').detected).toBe(true);
+      expect(detectInvisibleUnicodeCharacters('test\u2062').detected).toBe(true);
+      expect(detectInvisibleUnicodeCharacters('test\u2063').detected).toBe(true);
+    });
+
+    test('detects soft hyphen', () => {
+      const result = detectInvisibleUnicodeCharacters('test\u00AD');
+      expect(result.detected).toBe(true);
+      expect(result.codepoint).toContain('SOFT HYPHEN');
+    });
+
+    test('returns false for normal text', () => {
+      const result = detectInvisibleUnicodeCharacters('normal command');
+      expect(result.detected).toBe(false);
+    });
   });
 });
