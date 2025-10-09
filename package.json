@@ -1,23 +1,23 @@
 {
-  "name": "@simonb97/server-win-cli",
+  "name": "@quanticsoul4772/mcp-server-win-cli",
   "version": "0.3.0",
   "description": "MCP server for Windows CLI interactions - Improved Security & Stability",
   "type": "module",
   "bin": {
-    "server-win-cli": "./dist/index.js"
+    "mcp-server-win-cli": "./dist/index.js"
   },
   "files": [
     "dist"
   ],
   "license": "MIT",
-  "author": "Simon Benedict",
-  "homepage": "https://github.com/quanticsoul4772/win-cli-mcp-server",
+  "author": "quanticsoul4772",
+  "homepage": "https://github.com/quanticsoul4772/mcp-server-win-cli",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/quanticsoul4772/win-cli-mcp-server.git"
+    "url": "git+https://github.com/quanticsoul4772/mcp-server-win-cli.git"
   },
   "bugs": {
-    "url": "https://github.com/quanticsoul4772/win-cli-mcp-server/issues"
+    "url": "https://github.com/quanticsoul4772/mcp-server-win-cli/issues"
   },
   "keywords": [
     "mcp",

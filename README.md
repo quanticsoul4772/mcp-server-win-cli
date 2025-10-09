@@ -7,9 +7,9 @@
 > [!NOTE]
 > v0.3.0 - Active development with security improvements and enhanced stability.
 
-[![NPM Downloads](https://img.shields.io/npm/dt/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli)
-[![NPM Version](https://img.shields.io/npm/v/@simonb97/server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@simonb97/server-win-cli?activeTab=versions)
-[![smithery badge](https://smithery.ai/badge/@simonb97/server-win-cli)](https://smithery.ai/server/@simonb97/server-win-cli)
+[![NPM Downloads](https://img.shields.io/npm/dt/@quanticsoul4772/mcp-server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@quanticsoul4772/mcp-server-win-cli)
+[![NPM Version](https://img.shields.io/npm/v/@quanticsoul4772/mcp-server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@quanticsoul4772/mcp-server-win-cli?activeTab=versions)
+[![smithery badge](https://smithery.ai/badge/@quanticsoul4772/mcp-server-win-cli)](https://smithery.ai/server/@quanticsoul4772/mcp-server-win-cli)
 
 [MCP server](https://modelcontextprotocol.io/introduction) for secure command-line interactions on Windows systems, enabling controlled access to PowerShell, CMD, Git Bash shells, and remote systems via SSH. It allows MCP clients (like [Claude Desktop](https://claude.ai/download)) to perform operations on your system.
 
@@ -102,7 +102,7 @@ Add this to your `claude_desktop_config.json`:
   "mcpServers": {
     "windows-cli": {
       "command": "npx",
-      "args": ["-y", "@simonb97/server-win-cli"]
+      "args": ["-y", "@quanticsoul4772/mcp-server-win-cli"]
     }
   }
 }
@@ -117,7 +117,7 @@ For use with a specific config file, add the `--config` flag:
       "command": "npx",
       "args": [
         "-y",
-        "@simonb97/server-win-cli",
+        "@quanticsoul4772/mcp-server-win-cli",
         "--config",
         "path/to/your/config.json"
       ]
@@ -142,7 +142,7 @@ The server uses a JSON configuration file to customize its behavior. You can spe
 **b)** run:
 
 ```bash
-npx @simonb97/server-win-cli --init-config ./config.json
+npx @quanticsoul4772/mcp-server-win-cli --init-config ./config.json
 ```
 
 2. Then set the `--config` flag to point to your config file as described in the [Usage with Claude Desktop](#usage-with-claude-desktop) section.

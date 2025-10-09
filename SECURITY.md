@@ -128,8 +128,8 @@ Once a fix is available and sufficient time has passed for users to update:
 ## Security Advisories
 
 Security advisories will be published at:
-- **GitHub Security Advisories**: https://github.com/quanticsoul4772/win-cli-mcp-server/security/advisories
-- **npm Package Page**: https://www.npmjs.com/package/@simonb97/server-win-cli
+- **GitHub Security Advisories**: https://github.com/quanticsoul4772/mcp-server-win-cli/security/advisories
+- **npm Package Page**: https://www.npmjs.com/package/@quanticsoul4772/mcp-server-win-cli
 
 We recommend:
 - Subscribing to the GitHub repository to receive security notifications
@@ -179,8 +179,8 @@ For general support and feature requests, please use GitHub Issues. Reserve the 
 ## Scope
 
 This security policy covers:
-- The `@simonb97/server-win-cli` npm package
-- Source code in the https://github.com/quanticsoul4772/win-cli-mcp-server repository
+- The `@quanticsoul4772/mcp-server-win-cli` npm package
+- Source code in the https://github.com/quanticsoul4772/mcp-server-win-cli repository
 - Official documentation and configuration examples
 
 This policy does not cover:
