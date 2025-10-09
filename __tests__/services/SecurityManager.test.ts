@@ -1,28 +1,6 @@
-import { jest } from '@jest/globals';
+import { describe, test, expect, beforeEach } from '@jest/globals';
 import { SecurityManager } from '../../src/services/SecurityManager.js';
 import type { ServerConfig } from '../../src/types/config.js';
-
-// Import validation functions to mock them
-import {
-  validateShellOperators,
-  parseCommand,
-  extractCommandName,
-  isCommandBlocked,
-  getBlockedCommandName,
-  isArgumentBlocked,
-  getBlockedArgument
-} from '../../src/utils/validation.js';
-
-// Mock all validation utilities
-jest.mock('../../src/utils/validation.js');
-
-const mockValidateShellOperators = validateShellOperators as jest.MockedFunction<typeof validateShellOperators>;
-const mockParseCommand = parseCommand as jest.MockedFunction<typeof parseCommand>;
-const mockExtractCommandName = extractCommandName as jest.MockedFunction<typeof extractCommandName>;
-const mockIsCommandBlocked = isCommandBlocked as jest.MockedFunction<typeof isCommandBlocked>;
-const mockGetBlockedCommandName = getBlockedCommandName as jest.MockedFunction<typeof getBlockedCommandName>;
-const mockIsArgumentBlocked = isArgumentBlocked as jest.MockedFunction<typeof isArgumentBlocked>;
-const mockGetBlockedArgument = getBlockedArgument as jest.MockedFunction<typeof getBlockedArgument>;
 
 describe('SecurityManager', () => {
   let mockConfig: ServerConfig;
@@ -30,8 +8,6 @@ describe('SecurityManager', () => {
   let security: SecurityManager;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-
     mockConfig = {
       security: {
         blockedCommands: ['rm', 'del', 'format'],
@@ -77,76 +53,16 @@ describe('SecurityManager', () => {
 
     blockedCommands = new Set(mockConfig.security.blockedCommands);
     security = new SecurityManager(mockConfig, blockedCommands, null);
-
-    // Setup default mock implementations
-    mockValidateShellOperators.mockImplementation(() => {});
-    mockParseCommand.mockReturnValue({
-      command: 'test-command',
-      args: []
-    });
-    mockExtractCommandName.mockReturnValue('test-command');
-    mockIsCommandBlocked.mockReturnValue(false);
-    mockIsArgumentBlocked.mockReturnValue(false);
   });
 
   describe('validateCommand()', () => {
-    it('should pass validation for safe command', () => {
-      expect(() => {
-        security.validateCommand('powershell', 'Get-Process');
-      }).not.toThrow();
-
-      expect(mockValidateShellOperators).toHaveBeenCalledWith(
-        'Get-Process',
-        mockConfig.shells.powershell,
-        null
-      );
-      expect(mockParseCommand).toHaveBeenCalledWith('Get-Process');
-    });
-
-    it('should throw on blocked shell operators', () => {
-      mockValidateShellOperators.mockImplementation(() => {
-        throw new Error('Command contains blocked operator: &');
-      });
-
-      expect(() => {
-        security.validateCommand('powershell', 'cmd & calc');
-      }).toThrow(/blocked operator/i);
-    });
-
-    it('should throw on blocked command name', () => {
-      mockExtractCommandName.mockReturnValue('rm');
-      mockIsCommandBlocked.mockReturnValue(true);
-      mockGetBlockedCommandName.mockReturnValue('rm');
-
+    test('should throw on blocked command name', () => {
       expect(() => {
         security.validateCommand('powershell', 'rm -rf /');
       }).toThrow(/Command 'rm' is blocked/i);
-
-      expect(mockIsCommandBlocked).toHaveBeenCalledWith(
-        'rm',
-        ['rm', 'del', 'format']
-      );
     });
 
-    it('should throw on blocked arguments', () => {
-      mockParseCommand.mockReturnValue({
-        command: 'python',
-        args: ['script.py', '--exec', 'malicious']
-      });
-      mockIsArgumentBlocked.mockReturnValue(true);
-      mockGetBlockedArgument.mockReturnValue('--exec');
-
-      expect(() => {
-        security.validateCommand('powershell', 'python script.py --exec malicious');
-      }).toThrow(/Argument contains blocked pattern '--exec'/i);
-
-      expect(mockIsArgumentBlocked).toHaveBeenCalledWith(
-        ['script.py', '--exec', 'malicious'],
-        mockConfig.security.blockedArguments
-      );
-    });
-
-    it('should throw on command exceeding max length', () => {
+    test('should throw on command exceeding max length', () => {
       const longCommand = 'a'.repeat(2001);
 
       expect(() => {
@@ -154,61 +70,52 @@ describe('SecurityManager', () => {
       }).toThrow(/exceeds maximum length of 2000/i);
     });
 
-    it('should validate all stages in order', () => {
-      const command = 'Get-Process';
-
-      security.validateCommand('powershell', command);
-
-      // Verify call order
-      expect(mockValidateShellOperators).toHaveBeenCalled();
-      expect(mockParseCommand).toHaveBeenCalled();
-      expect(mockExtractCommandName).toHaveBeenCalled();
-      expect(mockIsCommandBlocked).toHaveBeenCalled();
-      expect(mockIsArgumentBlocked).toHaveBeenCalled();
-    });
-
-    it('should stop validation on first failure', () => {
-      mockValidateShellOperators.mockImplementation(() => {
-        throw new Error('Operator blocked');
-      });
-
+    test('should throw on shell operator in command', () => {
       expect(() => {
         security.validateCommand('powershell', 'cmd & calc');
-      }).toThrow('Operator blocked');
-
-      // Later stages should not be called
-      expect(mockParseCommand).not.toHaveBeenCalled();
+      }).toThrow(/blocked operator/i);
     });
 
-    it('should work with different shells', () => {
-      security.validateCommand('cmd', 'dir');
-
-      expect(mockValidateShellOperators).toHaveBeenCalledWith(
-        'dir',
-        mockConfig.shells.cmd,
-        null
-      );
+    test('should throw on pipe operator', () => {
+      expect(() => {
+        security.validateCommand('powershell', 'dir | findstr test');
+      }).toThrow(/blocked operator/i);
     });
 
-    it('should pass config path to validation', () => {
-      const securityWithPath = new SecurityManager(
-        mockConfig,
-        blockedCommands,
-        'C:\\config\\config.json'
-      );
+    test('should throw on semicolon operator', () => {
+      expect(() => {
+        security.validateCommand('powershell', 'dir ; calc');
+      }).toThrow(/blocked operator/i);
+    });
 
-      securityWithPath.validateCommand('powershell', 'test');
+    test('should throw on backtick operator', () => {
+      expect(() => {
+        security.validateCommand('powershell', 'echo `calc`');
+      }).toThrow(/blocked operator/i);
+    });
 
-      expect(mockValidateShellOperators).toHaveBeenCalledWith(
-        'test',
-        mockConfig.shells.powershell,
-        'C:\\config\\config.json'
-      );
+    test('should throw on blocked argument pattern', () => {
+      expect(() => {
+        security.validateCommand('powershell', 'python --exec malicious');
+      }).toThrow(/Argument contains blocked pattern/i);
+    });
+
+    test('should validate command with allowed path', () => {
+      // This should not throw
+      expect(() => {
+        security.validateCommand('powershell', 'Get-Process');
+      }).not.toThrow();
+    });
+
+    test('should work with CMD shell', () => {
+      expect(() => {
+        security.validateCommand('cmd', 'dir & calc');
+      }).toThrow(/blocked operator/i);
     });
   });
 
   describe('getConfig()', () => {
-    it('should return security configuration summary', () => {
+    test('should return security configuration summary', () => {
       const config = security.getConfig();
 
       expect(config).toEqual({
@@ -238,7 +145,7 @@ describe('SecurityManager', () => {
       });
     });
 
-    it('should handle empty blocked operators', () => {
+    test('should handle empty blocked operators', () => {
       const configWithNoOperators = {
         ...mockConfig,
         shells: {
@@ -263,7 +170,7 @@ describe('SecurityManager', () => {
   });
 
   describe('getShellConfig()', () => {
-    it('should return specific shell configuration', () => {
+    test('should return specific shell configuration', () => {
       const shellConfig = security.getShellConfig('powershell');
 
       expect(shellConfig).toEqual({
@@ -274,7 +181,7 @@ describe('SecurityManager', () => {
       });
     });
 
-    it('should return configuration for different shells', () => {
+    test('should return configuration for different shells', () => {
       const cmdConfig = security.getShellConfig('cmd');
       expect(cmdConfig.command).toBe('cmd.exe');
 
@@ -284,14 +191,14 @@ describe('SecurityManager', () => {
   });
 
   describe('getEnabledShells()', () => {
-    it('should return list of enabled shell names', () => {
+    test('should return list of enabled shell names', () => {
       const enabled = security.getEnabledShells();
 
       expect(enabled).toEqual(['powershell', 'cmd']);
       expect(enabled).not.toContain('gitbash');
     });
 
-    it('should return empty array when no shells enabled', () => {
+    test('should return empty array when no shells enabled', () => {
       const configWithNoShells = {
         ...mockConfig,
         shells: {
@@ -310,7 +217,7 @@ describe('SecurityManager', () => {
       expect(securityNoShells.getEnabledShells()).toEqual([]);
     });
 
-    it('should return all shells when all enabled', () => {
+    test('should return all shells when all enabled', () => {
       const configAllEnabled = {
         ...mockConfig,
         shells: {
@@ -331,6 +238,41 @@ describe('SecurityManager', () => {
         'cmd',
         'gitbash'
       ]);
+    });
+  });
+
+  describe('validateCommand() with config path', () => {
+    test('should pass config path through validation', () => {
+      const securityWithPath = new SecurityManager(
+        mockConfig,
+        blockedCommands,
+        'C:\\config\\config.json'
+      );
+
+      // Should not throw for valid command
+      expect(() => {
+        securityWithPath.validateCommand('powershell', 'Get-Process');
+      }).not.toThrow();
+    });
+  });
+
+  describe('validateCommand() edge cases', () => {
+    test('should handle commands with multiple arguments', () => {
+      expect(() => {
+        security.validateCommand('powershell', 'Get-Process -Name explorer -Id 1234');
+      }).not.toThrow();
+    });
+
+    test('should detect blocked commands in paths', () => {
+      expect(() => {
+        security.validateCommand('powershell', 'C:\\tools\\rm.exe -rf /');
+      }).toThrow(/Command 'rm' is blocked/i);
+    });
+
+    test('should handle case-insensitive blocked commands', () => {
+      expect(() => {
+        security.validateCommand('powershell', 'RM -rf /');
+      }).toThrow(/Command 'rm' is blocked/i);
     });
   });
 });

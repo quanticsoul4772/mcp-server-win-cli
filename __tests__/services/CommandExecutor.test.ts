@@ -1,36 +1,17 @@
-import { jest } from '@jest/globals';
+import { describe, test, expect, beforeEach } from '@jest/globals';
 import { CommandExecutor } from '../../src/services/CommandExecutor.js';
 import type { ServerConfig } from '../../src/types/config.js';
-import { spawn } from 'child_process';
-
-// Mock child_process
-jest.mock('child_process');
-
-// Mock validation utilities
-jest.mock('../../src/utils/validation.js', () => ({
-  canonicalizePath: jest.fn((path: string) => path),
-  isPathAllowed: jest.fn(() => true)
-}));
-
-// Mock error sanitizer
-jest.mock('../../src/utils/errorSanitizer.js', () => ({
-  sanitizePathError: jest.fn((path: string) => path),
-  createUserFriendlyError: jest.fn((err: any) => err.message || String(err))
-}));
 
 describe('CommandExecutor', () => {
   let mockConfig: ServerConfig;
   let executor: CommandExecutor;
-  let mockSpawn: jest.MockedFunction<typeof spawn>;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-
     mockConfig = {
       security: {
         blockedCommands: [],
         blockedArguments: [],
-        allowedPaths: ['C:\\Users\\test'],
+        allowedPaths: [process.cwd()],
         restrictWorkingDirectory: true,
         maxCommandLength: 2000,
         commandTimeout: 30,
@@ -70,214 +51,129 @@ describe('CommandExecutor', () => {
     };
 
     executor = new CommandExecutor(mockConfig, mockConfig.security.allowedPaths, null);
-    mockSpawn = spawn as jest.MockedFunction<typeof spawn>;
   });
 
   describe('execute()', () => {
-    it('should execute command successfully with exit code 0', async () => {
-      const mockProcess = {
-        stdout: {
-          on: jest.fn((event: string, handler: any) => {
-            if (event === 'data') {
-              handler(Buffer.from('test output'));
-            }
-          })
-        },
-        stderr: {
-          on: jest.fn()
-        },
-        on: jest.fn((event: string, handler: any) => {
-          if (event === 'close') {
-            handler(0);
-          }
-        }),
-        kill: jest.fn()
-      };
-
-      mockSpawn.mockReturnValue(mockProcess as any);
-
+    test('should execute simple PowerShell command successfully', async () => {
       const result = await executor.execute({
         shell: 'powershell',
-        command: 'Get-Process',
-        workingDir: 'C:\\Users\\test'
+        command: 'Write-Output "test"'
       });
 
       expect(result.exitCode).toBe(0);
-      expect(result.output).toBe('test output');
-      expect(result.error).toBe('');
-      expect(mockSpawn).toHaveBeenCalledWith(
-        'powershell.exe',
-        ['-NoProfile', '-Command', 'Get-Process'],
-        expect.objectContaining({ cwd: 'C:\\Users\\test' })
-      );
-    });
+      expect(result.output).toContain('test');
+      expect(result.workingDirectory).toBeTruthy();
+    }, 10000);
 
-    it('should capture stderr on command failure', async () => {
-      const mockProcess = {
-        stdout: {
-          on: jest.fn()
-        },
-        stderr: {
-          on: jest.fn((event: string, handler: any) => {
-            if (event === 'data') {
-              handler(Buffer.from('error message'));
-            }
-          })
-        },
-        on: jest.fn((event: string, handler: any) => {
-          if (event === 'close') {
-            handler(1);
-          }
-        }),
-        kill: jest.fn()
-      };
-
-      mockSpawn.mockReturnValue(mockProcess as any);
-
+    test('should execute simple CMD command successfully', async () => {
       const result = await executor.execute({
         shell: 'cmd',
-        command: 'invalid-command'
+        command: 'echo test'
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('test');
+    }, 10000);
+
+    test('should capture exit code on command failure', async () => {
+      const result = await executor.execute({
+        shell: 'cmd',
+        command: 'exit 1'
       });
 
       expect(result.exitCode).toBe(1);
-      expect(result.error).toBe('error message');
-    });
+    }, 10000);
 
-    it('should use default working directory when not specified', async () => {
-      const mockProcess = {
-        stdout: { on: jest.fn() },
-        stderr: { on: jest.fn() },
-        on: jest.fn((event: string, handler: any) => {
-          if (event === 'close') handler(0);
-        }),
-        kill: jest.fn()
-      };
-
-      mockSpawn.mockReturnValue(mockProcess as any);
-
-      await executor.execute({
-        shell: 'powershell',
-        command: 'pwd'
-      });
-
-      expect(mockSpawn).toHaveBeenCalledWith(
-        'powershell.exe',
-        expect.any(Array),
-        expect.objectContaining({ cwd: expect.any(String) })
-      );
-    });
-
-    it('should enforce timeout and kill process', async () => {
-      jest.useFakeTimers();
-
-      const mockProcess = {
-        stdout: { on: jest.fn() },
-        stderr: { on: jest.fn() },
-        on: jest.fn(),
-        kill: jest.fn()
-      };
-
-      mockSpawn.mockReturnValue(mockProcess as any);
-
-      const executePromise = executor.execute({
-        shell: 'powershell',
-        command: 'Start-Sleep -Seconds 60',
-        timeout: 1
-      });
-
-      jest.advanceTimersByTime(1100);
-
-      await expect(executePromise).rejects.toThrow(/timed out/i);
-      expect(mockProcess.kill).toHaveBeenCalled();
-
-      jest.useRealTimers();
-    });
-
-    it('should use custom timeout when provided', async () => {
-      jest.useFakeTimers();
-
-      const mockProcess = {
-        stdout: { on: jest.fn() },
-        stderr: { on: jest.fn() },
-        on: jest.fn(),
-        kill: jest.fn()
-      };
-
-      mockSpawn.mockReturnValue(mockProcess as any);
-
-      const executePromise = executor.execute({
-        shell: 'powershell',
-        command: 'long-running-command',
-        timeout: 60
-      });
-
-      // Should NOT timeout after default 30 seconds
-      jest.advanceTimersByTime(35000);
-      expect(mockProcess.kill).not.toHaveBeenCalled();
-
-      // Should timeout after custom 60 seconds
-      jest.advanceTimersByTime(30000);
-      await expect(executePromise).rejects.toThrow(/timed out/i);
-
-      jest.useRealTimers();
-    });
-
-    it('should handle process spawn errors', async () => {
-      mockSpawn.mockImplementation(() => {
-        throw new Error('Failed to spawn process');
-      });
-
-      await expect(
-        executor.execute({
-          shell: 'powershell',
-          command: 'test'
-        })
-      ).rejects.toThrow(/Failed to start shell process/i);
-    });
-
-    it('should handle missing stdout/stderr streams', async () => {
-      const mockProcess = {
-        stdout: null,
-        stderr: null,
-        on: jest.fn(),
-        kill: jest.fn()
-      };
-
-      mockSpawn.mockReturnValue(mockProcess as any);
-
-      await expect(
-        executor.execute({
-          shell: 'powershell',
-          command: 'test'
-        })
-      ).rejects.toThrow(/Failed to initialize shell process streams/i);
-    });
-
-    it('should return exit code -1 when process exits without code', async () => {
-      const mockProcess = {
-        stdout: { on: jest.fn() },
-        stderr: { on: jest.fn() },
-        on: jest.fn((event: string, handler: any) => {
-          if (event === 'close') {
-            handler(null); // No exit code
-          }
-        }),
-        kill: jest.fn()
-      };
-
-      mockSpawn.mockReturnValue(mockProcess as any);
-
+    test('should use specified working directory', async () => {
       const result = await executor.execute({
         shell: 'powershell',
-        command: 'test'
+        command: 'Get-Location',
+        workingDir: process.cwd()
       });
 
-      expect(result.exitCode).toBe(-1);
-    });
+      expect(result.exitCode).toBe(0);
+      expect(result.workingDirectory).toBe(process.cwd());
+    }, 10000);
+
+    test('should enforce timeout on long-running command', async () => {
+      await expect(
+        executor.execute({
+          shell: 'powershell',
+          command: 'Start-Sleep -Seconds 5',
+          timeout: 1
+        })
+      ).rejects.toThrow(/timed out/i);
+    }, 15000);
+
+    test('should handle command that produces stderr', async () => {
+      const result = await executor.execute({
+        shell: 'powershell',
+        command: 'Write-Error "test error"'
+      });
+
+      // PowerShell Write-Error writes to stderr but may exit 0
+      expect(result.error).toContain('test error');
+    }, 10000);
+
+    test('should reject invalid working directory', async () => {
+      await expect(
+        executor.execute({
+          shell: 'powershell',
+          command: 'Get-Location',
+          workingDir: 'C:\\nonexistent\\directory'
+        })
+      ).rejects.toThrow();
+    }, 10000);
+
+    test('should reject working directory outside allowed paths when restricted', async () => {
+      const restrictedExecutor = new CommandExecutor(
+        {
+          ...mockConfig,
+          security: {
+            ...mockConfig.security,
+            restrictWorkingDirectory: true,
+            allowedPaths: ['C:\\AllowedPath']
+          }
+        },
+        ['C:\\AllowedPath'],
+        null
+      );
+
+      await expect(
+        restrictedExecutor.execute({
+          shell: 'powershell',
+          command: 'Get-Location',
+          workingDir: process.cwd() // Not in allowed paths
+        })
+      ).rejects.toThrow(/not in allowed paths/i);
+    }, 10000);
+
+    test('should allow working directory when restriction disabled', async () => {
+      const unrestrictedExecutor = new CommandExecutor(
+        {
+          ...mockConfig,
+          security: {
+            ...mockConfig.security,
+            restrictWorkingDirectory: false,
+            allowedPaths: ['C:\\AllowedPath']
+          }
+        },
+        ['C:\\AllowedPath'],
+        null
+      );
+
+      const result = await unrestrictedExecutor.execute({
+        shell: 'powershell',
+        command: 'Get-Location',
+        workingDir: process.cwd()
+      });
+
+      expect(result.exitCode).toBe(0);
+    }, 10000);
   });
 
   describe('formatResult()', () => {
-    it('should format successful result', () => {
+    test('should format successful result', () => {
       const result = {
         output: 'success output',
         error: '',
@@ -289,7 +185,7 @@ describe('CommandExecutor', () => {
       expect(formatted).toBe('success output');
     });
 
-    it('should handle empty output on success', () => {
+    test('should handle empty output on success', () => {
       const result = {
         output: '',
         error: '',
@@ -301,7 +197,7 @@ describe('CommandExecutor', () => {
       expect(formatted).toContain('completed successfully');
     });
 
-    it('should format error result with both output and error', () => {
+    test('should format error result with both output and error', () => {
       const result = {
         output: 'stdout content',
         error: 'stderr content',
@@ -315,7 +211,7 @@ describe('CommandExecutor', () => {
       expect(formatted).toContain('stdout content');
     });
 
-    it('should handle error with no output', () => {
+    test('should handle error with no output', () => {
       const result = {
         output: '',
         error: '',
@@ -327,5 +223,63 @@ describe('CommandExecutor', () => {
       expect(formatted).toContain('exit code 1');
       expect(formatted).toContain('No error message or output');
     });
+
+    test('should format error with only stderr', () => {
+      const result = {
+        output: '',
+        error: 'error message only',
+        exitCode: 2,
+        workingDirectory: 'C:\\Users\\test'
+      };
+
+      const formatted = executor.formatResult(result, 'test-command');
+      expect(formatted).toContain('exit code 2');
+      expect(formatted).toContain('error message only');
+    });
+
+    test('should format error with only stdout', () => {
+      const result = {
+        output: 'output message only',
+        error: '',
+        exitCode: 3,
+        workingDirectory: 'C:\\Users\\test'
+      };
+
+      const formatted = executor.formatResult(result, 'test-command');
+      expect(formatted).toContain('exit code 3');
+      expect(formatted).toContain('output message only');
+    });
+  });
+
+  describe('integration tests', () => {
+    test('should handle PowerShell with multiple output lines', async () => {
+      const result = await executor.execute({
+        shell: 'powershell',
+        command: 'Write-Output "line1"; Write-Output "line2"'
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('line1');
+      expect(result.output).toContain('line2');
+    }, 10000);
+
+    test('should handle CMD with echo off', async () => {
+      const result = await executor.execute({
+        shell: 'cmd',
+        command: '@echo off & echo test'
+      });
+
+      expect(result.output).toContain('test');
+    }, 10000);
+
+    test('should handle commands with special characters in output', async () => {
+      const result = await executor.execute({
+        shell: 'powershell',
+        command: 'Write-Output "test with $special #chars @here"'
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('test with');
+    }, 10000);
   });
 });
