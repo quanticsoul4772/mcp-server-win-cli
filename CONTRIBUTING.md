@@ -165,23 +165,74 @@ npm start -- --config ./config.json
 ```
 win-cli-mcp-server/
 ├── src/
-│   ├── index.ts           # Main server entry point
-│   ├── types/             # TypeScript type definitions
-│   │   ├── config.ts      # Configuration types
-│   │   └── schemas.ts     # Zod validation schemas
-│   └── utils/             # Utility functions
-│       ├── config.ts      # Configuration management
-│       ├── deepMerge.ts   # Secure configuration merging
-│       ├── validation.ts  # Security validation functions
-│       ├── ssh.ts         # SSH connection management
-│       ├── sshManager.ts  # SSH configuration CRUD
-│       └── sessionManager.ts # Session state management
-├── tests/                 # Test files
-│   └── validation.test.ts # Validation function tests
-├── dist/                  # Compiled JavaScript (generated)
-├── CLAUDE.md              # AI assistant development guide
-├── README.md              # User documentation
-└── package.json           # Project configuration
+│   ├── index.ts              # Main server entry point and MCP integration
+│   ├── server/               # Foundation layer
+│   │   └── ServiceContainer.ts  # Dependency injection container
+│   ├── registries/           # Core registries
+│   │   └── ToolRegistry.ts      # Tool registration and execution
+│   ├── services/             # Business logic layer
+│   │   ├── ConfigManager.ts     # Configuration management
+│   │   ├── SecurityManager.ts   # Security validation orchestration
+│   │   ├── CommandExecutor.ts   # Command execution logic
+│   │   ├── HistoryManager.ts    # Command history tracking
+│   │   └── index.ts             # Service exports
+│   ├── tools/                # MCP tools (presentation layer)
+│   │   ├── base/
+│   │   │   ├── BaseTool.ts      # Abstract base class for all tools
+│   │   │   └── types.ts         # Tool type definitions
+│   │   ├── command/             # Command execution tools
+│   │   │   ├── ExecuteCommandTool.ts
+│   │   │   ├── ReadCommandHistoryTool.ts
+│   │   │   └── index.ts
+│   │   ├── ssh/                 # SSH operations tools
+│   │   │   ├── SSHExecuteTool.ts
+│   │   │   ├── SSHDisconnectTool.ts
+│   │   │   ├── CreateSSHConnectionTool.ts
+│   │   │   ├── ReadSSHConnectionsTool.ts
+│   │   │   ├── UpdateSSHConnectionTool.ts
+│   │   │   ├── DeleteSSHConnectionTool.ts
+│   │   │   ├── ReadSSHPoolStatusTool.ts
+│   │   │   ├── ValidateSSHConnectionTool.ts
+│   │   │   └── index.ts
+│   │   ├── diagnostics/         # Diagnostic tools
+│   │   │   ├── CheckSecurityConfigTool.ts
+│   │   │   ├── ValidateCommandTool.ts
+│   │   │   └── index.ts
+│   │   ├── system/              # System info tools
+│   │   │   ├── ReadCurrentDirectoryTool.ts
+│   │   │   └── index.ts
+│   │   └── index.ts             # Tool exports
+│   ├── types/                # TypeScript type definitions
+│   │   ├── config.ts         # Configuration types
+│   │   └── schemas.ts        # Zod validation schemas
+│   └── utils/                # Utility functions
+│       ├── config.ts         # Configuration loading
+│       ├── deepMerge.ts      # Secure configuration merging
+│       ├── validation.ts     # Security validation functions
+│       ├── ssh.ts            # SSH connection management
+│       ├── sshManager.ts     # SSH configuration CRUD
+│       ├── sessionManager.ts # Session state management
+│       ├── errorSanitizer.ts # Error sanitization utilities
+│       └── knownHosts.ts     # SSH host key verification
+├── __tests__/                # Test files
+│   ├── server/
+│   │   └── ServiceContainer.test.ts
+│   ├── services/
+│   │   ├── ConfigManager.test.ts
+│   │   ├── SecurityManager.test.ts
+│   │   ├── CommandExecutor.test.ts
+│   │   └── HistoryManager.test.ts
+│   └── tools/
+│       └── (tool tests)
+├── tests/
+│   └── validation.test.ts    # Validation function tests
+├── dist/                     # Compiled JavaScript (generated)
+├── docs/                     # Additional documentation
+│   └── UNICODE_SECURITY.md   # Unicode security documentation
+├── CLAUDE.md                 # AI assistant development guide
+├── CONTRIBUTING.md           # This file
+├── README.md                 # User documentation
+└── package.json              # Project configuration
 ```
 
 ## Pull Request Process

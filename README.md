@@ -72,6 +72,27 @@ See the [API](#api) section for details on the tools and resources the server pr
 
 Note: The server will only allow operations within configured directories, with allowed commands, and on configured SSH connections.
 
+## Architecture
+
+The server uses a layered architecture with dependency injection for maintainability and testability:
+
+**Foundation Layer:**
+- ServiceContainer: Lightweight dependency injection with singleton, transient, and instance lifecycles
+- ToolRegistry: Manages tool registration, discovery, and execution
+
+**Service Layer:**
+- ConfigManager: Configuration loading and validation
+- SecurityManager: Multi-stage command validation pipeline
+- CommandExecutor: Process spawning and timeout management
+- HistoryManager: Command history tracking with size limits
+
+**Presentation Layer:**
+- 13 MCP tools organized by category (command execution, SSH operations, diagnostics, system info)
+- All tools extend BaseTool abstract class
+- Tools use dependency injection to access services
+
+This architecture provides separation of concerns, making the codebase easier to maintain and extend. For detailed architecture documentation, see CLAUDE.md.
+
 ## Usage with Claude Desktop
 
 Add this to your `claude_desktop_config.json`:
@@ -936,10 +957,27 @@ Validate a command without executing it to see if it would be blocked:
 }
 ```
 
-**Returns:**
-- `isValid`: `true` if command would execute, `false` if blocked
-- `errors`: Array of validation errors if command would be blocked
-- `warnings`: Array of warnings about the command
+**Returns when valid:**
+```json
+{
+  "valid": true,
+  "shell": "powershell",
+  "command": "Remove-Item test.txt",
+  "workingDir": "C:\\MyProjects",
+  "message": "Command passed all security validation stages"
+}
+```
+
+**Returns when invalid:**
+```json
+{
+  "valid": false,
+  "shell": "powershell",
+  "command": "rm -rf /",
+  "workingDir": "C:\\MyProjects",
+  "reason": "Command contains blocked command: rm"
+}
+```
 
 **Use cases:**
 - Test commands before running to avoid validation failures
