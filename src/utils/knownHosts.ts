@@ -8,6 +8,7 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { lock } from 'proper-lockfile';
+import { Mutex } from 'async-mutex';
 
 export interface HostKeyEntry {
   /** Host key algorithm (e.g., 'ssh-rsa', 'ecdsa-sha2-nistp256', 'ssh-ed25519') */
@@ -30,6 +31,7 @@ export class KnownHostsManager {
   private knownHostsPath: string;
   private knownHosts: KnownHostsStore = {};
   private initialized: boolean = false;
+  private mutex: Mutex = new Mutex();
 
   constructor(customPath?: string) {
     if (customPath) {
@@ -194,7 +196,7 @@ export class KnownHostsManager {
 
         return {
           accepted: false,
-          reason: `HOST KEY MISMATCH for ${host}:${port}! Possible MITM attack. Expected: ${existingEntry.fingerprint}, Got: ${fingerprint}`
+          reason: `HOST KEY MISMATCH for ${host}:${port}! Possible MITM attack. Expected: ${existingEntry.fingerprint}, Got: ${fingerprint}. If you trust this new key, manually remove the old entry from known_hosts file at: ${this.knownHostsPath}`
         };
       }
     }
@@ -202,63 +204,68 @@ export class KnownHostsManager {
 
   /**
    * Add or update a host entry in the known hosts database
-   * Uses file locking to prevent concurrent write conflicts
+   * Uses mutex and file locking to prevent concurrent write conflicts
    */
   private async addOrUpdateHost(hostKey: string, entry: HostKeyEntry): Promise<void> {
-    try {
-      // Ensure directory exists
-      const dir = path.dirname(this.knownHostsPath);
-      await fs.mkdir(dir, { recursive: true });
-
-      // Update in-memory cache
-      this.knownHosts[hostKey] = entry;
-
-      // Check if file exists, create empty object if not
-      let fileExists = false;
+    // Use mutex to serialize all file operations
+    return this.mutex.runExclusive(async () => {
       try {
-        await fs.access(this.knownHostsPath);
-        fileExists = true;
-      } catch {
-        // File doesn't exist yet
-        await fs.writeFile(this.knownHostsPath, '{}', 'utf8');
-        fileExists = true;
-      }
+        // Ensure directory exists
+        const dir = path.dirname(this.knownHostsPath);
+        await fs.mkdir(dir, { recursive: true });
 
-      // Acquire lock on the file
-      let release: (() => Promise<void>) | undefined;
-      try {
-        release = await lock(this.knownHostsPath, {
-          retries: {
-            retries: 5,
-            minTimeout: 100,
-            maxTimeout: 1000
-          },
-          stale: 10000 // 10 second stale lock timeout
-        });
+        // Update in-memory cache
+        this.knownHosts[hostKey] = entry;
 
-        // Re-read the file to get latest state
-        const data = await fs.readFile(this.knownHostsPath, 'utf8');
-        const currentHosts = JSON.parse(data) as KnownHostsStore;
-
-        // Merge our update
-        currentHosts[hostKey] = entry;
-
-        // Write back to file
-        await fs.writeFile(
-          this.knownHostsPath,
-          JSON.stringify(currentHosts, null, 2),
-          'utf8'
-        );
-      } finally {
-        // Release the lock
-        if (release) {
-          await release();
+        // Check if file exists, create empty object if not
+        let fileExists = false;
+        try {
+          await fs.access(this.knownHostsPath);
+          fileExists = true;
+        } catch {
+          // File doesn't exist yet
+          await fs.writeFile(this.knownHostsPath, '{}', 'utf8');
+          fileExists = true;
         }
+
+        // Acquire lock on the file
+        let release: (() => Promise<void>) | undefined;
+        try {
+          release = await lock(this.knownHostsPath, {
+            retries: {
+              retries: 10,
+              minTimeout: 50,
+              maxTimeout: 2000,
+              factor: 2
+            },
+            stale: 15000, // 15 second stale lock timeout
+            realpath: false // Don't resolve symlinks to avoid ENOENT errors
+          });
+
+          // Re-read the file to get latest state
+          const data = await fs.readFile(this.knownHostsPath, 'utf8');
+          const currentHosts = JSON.parse(data) as KnownHostsStore;
+
+          // Merge our update
+          currentHosts[hostKey] = entry;
+
+          // Write back to file
+          await fs.writeFile(
+            this.knownHostsPath,
+            JSON.stringify(currentHosts, null, 2),
+            'utf8'
+          );
+        } finally {
+          // Release the lock
+          if (release) {
+            await release();
+          }
+        }
+      } catch (error) {
+        console.error('Failed to update known hosts:', error instanceof Error ? error.message : String(error));
+        throw new Error('Failed to save SSH host key');
       }
-    } catch (error) {
-      console.error('Failed to update known hosts:', error instanceof Error ? error.message : String(error));
-      throw new Error('Failed to save SSH host key');
-    }
+    });
   }
 
   /**
