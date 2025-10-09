@@ -7,10 +7,6 @@
 > [!NOTE]
 > v0.3.0 - Active development with security improvements and enhanced stability.
 
-[![NPM Downloads](https://img.shields.io/npm/dt/@quanticsoul4772/mcp-server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@quanticsoul4772/mcp-server-win-cli)
-[![NPM Version](https://img.shields.io/npm/v/@quanticsoul4772/mcp-server-win-cli.svg?style=flat)](https://www.npmjs.com/package/@quanticsoul4772/mcp-server-win-cli?activeTab=versions)
-[![smithery badge](https://smithery.ai/badge/@quanticsoul4772/mcp-server-win-cli)](https://smithery.ai/server/@quanticsoul4772/mcp-server-win-cli)
-
 [MCP server](https://modelcontextprotocol.io/introduction) for secure command-line interactions on Windows systems, enabling controlled access to PowerShell, CMD, Git Bash shells, and remote systems via SSH. It allows MCP clients (like [Claude Desktop](https://claude.ai/download)) to perform operations on your system.
 
 ## What's New in v0.3.0
