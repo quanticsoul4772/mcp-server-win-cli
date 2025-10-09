@@ -1,5 +1,5 @@
 import type { ServiceContainer } from "../../server/ServiceContainer.js";
-import type { ToolResult, ToolCategory } from "./types.js";
+import type { ToolResult, ToolCategory, StructuredError } from "./types.js";
 
 /**
  * Abstract base class for all MCP tools
@@ -116,16 +116,21 @@ export abstract class BaseTool {
    *
    * @param message - Error message
    * @param exitCode - Exit code (default: -1)
+   * @param metadata - Optional metadata including structured error
    * @returns Formatted error result
    */
-  protected error(message: string, exitCode: number = -1): ToolResult {
+  protected error(message: string, exitCode: number = -1, metadata?: { structured?: StructuredError; [key: string]: any }): ToolResult {
     return {
       content: [{
         type: 'text',
         text: message
       }],
       isError: true,
-      _meta: { exitCode }
+      _meta: {
+        exitCode,
+        ...(metadata?.structured && { structured: metadata.structured }),
+        ...(metadata && { metadata })
+      }
     };
   }
 
@@ -133,9 +138,42 @@ export abstract class BaseTool {
    * Helper to create a validation error result
    *
    * @param message - Validation error message
+   * @param structured - Optional structured error information
    * @returns Formatted validation error (exitCode: -2)
    */
-  protected validationError(message: string): ToolResult {
-    return this.error(message, -2);
+  protected validationError(message: string, structured?: StructuredError): ToolResult {
+    return this.error(message, -2, structured ? { structured } : undefined);
+  }
+
+  /**
+   * Helper to create a structured error for common scenarios
+   *
+   * @param errorType - Error type identifier
+   * @param code - Error code
+   * @param details - Error-specific details
+   * @param userGuidance - Human-readable guidance
+   * @param diagnosticTool - Optional diagnostic tool to suggest
+   * @param diagnosticArgs - Optional arguments for diagnostic tool
+   * @param helpUrl - Optional documentation URL
+   * @returns StructuredError object
+   */
+  protected createStructuredError(
+    errorType: string,
+    code: string,
+    details: Record<string, any>,
+    userGuidance: string,
+    diagnosticTool?: string,
+    diagnosticArgs?: Record<string, any>,
+    helpUrl?: string
+  ): StructuredError {
+    return {
+      error: errorType,
+      code,
+      details,
+      user_guidance: userGuidance,
+      ...(diagnosticTool && { diagnostic_tool: diagnosticTool }),
+      ...(diagnosticArgs && { diagnostic_args: diagnosticArgs }),
+      ...(helpUrl && { help_url: helpUrl })
+    };
   }
 }

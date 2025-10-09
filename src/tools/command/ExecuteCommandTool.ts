@@ -124,26 +124,133 @@ Example usage (Git Bash):
       // Validation or execution error
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      // Log failed command to history (validation failures get -2, execution failures get -1)
-      if (historyManager.isEnabled()) {
-        const exitCode = errorMessage.includes('blocked') ||
-                        errorMessage.includes('exceeds') ||
-                        errorMessage.includes('not in allowed paths') ? -2 : -1;
+      // Determine if this is a validation (-2) or execution (-1) error
+      const isValidationError = errorMessage.includes('blocked') ||
+                                errorMessage.includes('exceeds') ||
+                                errorMessage.includes('not in allowed paths') ||
+                                errorMessage.includes('operator');
+      const exitCode = isValidationError ? -2 : -1;
 
+      // Log failed command to history
+      if (historyManager.isEnabled()) {
         historyManager.add({
           command,
-          output: '',
+          output: errorMessage,
           timestamp: new Date().toISOString(),
           exitCode
         });
       }
 
-      // Determine exit code for error response
-      const exitCode = errorMessage.includes('blocked') ||
-                      errorMessage.includes('exceeds') ||
-                      errorMessage.includes('not in allowed paths') ? -2 : -1;
+      // Create structured error based on error type
+      let structured = undefined;
 
-      return this.error(errorMessage, exitCode);
+      if (isValidationError) {
+        // Validation error - provide diagnostic guidance
+        if (errorMessage.includes('blocked command')) {
+          const commandMatch = errorMessage.match(/command:\s*(\S+)/i);
+          const blockedCmd = commandMatch ? commandMatch[1] : 'unknown';
+
+          structured = this.createStructuredError(
+            'command_blocked',
+            'SEC001',
+            {
+              blocked_command: blockedCmd,
+              command: command,
+              shell: shell
+            },
+            `The command "${blockedCmd}" is blocked by security policy. Either use an alternative command or modify the blockedCommands list in your config.json to allow it.`,
+            'check_security_config',
+            { category: 'commands' },
+            'https://github.com/quanticsoul4772/mcp-server-win-cli#issue-command-is-blocked-or-command-contains-blocked-command'
+          );
+        } else if (errorMessage.includes('operator') || errorMessage.includes('blocked operator')) {
+          const operatorMatch = errorMessage.match(/operator:\s*(.)/);
+          const blockedOp = operatorMatch ? operatorMatch[1] : 'shell operator';
+
+          structured = this.createStructuredError(
+            'operator_blocked',
+            'SEC002',
+            {
+              blocked_operator: blockedOp,
+              command: command,
+              shell: shell
+            },
+            `Shell operators (${blockedOp}) are blocked for security. Use PowerShell cmdlets or break the operation into multiple commands.`,
+            'check_security_config',
+            { category: 'operators' },
+            'https://github.com/quanticsoul4772/mcp-server-win-cli#issue-shell-operators-blocked-pipes-redirects-command-chaining'
+          );
+        } else if (errorMessage.includes('not in allowed paths') || errorMessage.includes('outside allowed paths')) {
+          structured = this.createStructuredError(
+            'path_not_allowed',
+            'SEC003',
+            {
+              working_dir: workingDir || process.cwd(),
+              command: command
+            },
+            'The working directory is outside allowedPaths. Add the path to your config.json allowedPaths array, or set restrictWorkingDirectory to false (not recommended).',
+            'validate_config',
+            { show_merge_details: true },
+            'https://github.com/quanticsoul4772/mcp-server-win-cli#issue-path-not-allowed-or-working-directory-outside-allowed-paths'
+          );
+        } else if (errorMessage.includes('exceeds')) {
+          structured = this.createStructuredError(
+            'command_too_long',
+            'SEC004',
+            {
+              command_length: command.length,
+              max_length: 'See config'
+            },
+            'Command exceeds maxCommandLength. Shorten the command or increase maxCommandLength in config.json.',
+            'check_security_config',
+            { category: 'limits' }
+          );
+        }
+      } else {
+        // Execution error - provide diagnostic guidance
+        if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
+          structured = this.createStructuredError(
+            'command_timeout',
+            'EXEC001',
+            {
+              command: command,
+              shell: shell,
+              timeout: timeout || 'default'
+            },
+            'Command timed out. Increase the timeout parameter or the commandTimeout setting in config.json.',
+            'explain_exit_code',
+            { exit_code: -1 },
+            'https://github.com/quanticsoul4772/mcp-server-win-cli#issue-command-times-out'
+          );
+        } else if (errorMessage.includes('not found') || errorMessage.includes('command not found')) {
+          structured = this.createStructuredError(
+            'command_not_found',
+            'EXEC002',
+            {
+              command: command,
+              shell: shell
+            },
+            `Command not found in ${shell}. Verify the command exists and is in PATH, or use the full path to the executable.`,
+            'test_connection',
+            { shell: shell, working_dir: workingDir }
+          );
+        } else {
+          structured = this.createStructuredError(
+            'execution_failed',
+            'EXEC003',
+            {
+              command: command,
+              shell: shell,
+              error: errorMessage
+            },
+            'Command failed during execution. Check the error message for details and verify command syntax.',
+            'read_command_history',
+            { limit: 5 }
+          );
+        }
+      }
+
+      return this.error(errorMessage, exitCode, { structured });
     }
   }
 }

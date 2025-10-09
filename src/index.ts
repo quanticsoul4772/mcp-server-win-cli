@@ -10,7 +10,7 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig, createDefaultConfig } from './utils/config.js';
-import type { ServerConfig } from './types/config.js';
+import type { ServerConfig, CommandHistoryEntry } from './types/config.js';
 import { SSHConnectionPool } from './utils/ssh.js';
 import { createRequire } from 'module';
 import { readSSHConnections } from './utils/sshManager.js';
@@ -32,6 +32,10 @@ import { ReadSSHPoolStatusTool } from './tools/ssh/ReadSSHPoolStatusTool.js';
 import { ValidateSSHConnectionTool } from './tools/ssh/ValidateSSHConnectionTool.js';
 import { CheckSecurityConfigTool } from './tools/diagnostics/CheckSecurityConfigTool.js';
 import { ValidateCommandTool } from './tools/diagnostics/ValidateCommandTool.js';
+import { ExplainExitCodeTool } from './tools/diagnostics/ExplainExitCodeTool.js';
+import { ValidateConfigTool } from './tools/diagnostics/ValidateConfigTool.js';
+import { ReadSystemInfoTool } from './tools/diagnostics/ReadSystemInfoTool.js';
+import { TestConnectionTool } from './tools/diagnostics/TestConnectionTool.js';
 import { ReadCurrentDirectoryTool } from './tools/system/ReadCurrentDirectoryTool.js';
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
@@ -119,6 +123,10 @@ class CLIServer {
     // Register diagnostic tools
     this.toolRegistry.register(new CheckSecurityConfigTool(this.container));
     this.toolRegistry.register(new ValidateCommandTool(this.container));
+    this.toolRegistry.register(new ExplainExitCodeTool(this.container));
+    this.toolRegistry.register(new ValidateConfigTool(this.container));
+    this.toolRegistry.register(new ReadSystemInfoTool(this.container));
+    this.toolRegistry.register(new TestConnectionTool(this.container));
 
     // Register system tools
     this.toolRegistry.register(new ReadCurrentDirectoryTool(this.container));
@@ -157,6 +165,27 @@ class CLIServer {
         uri: "cli://config",
         name: "CLI Server Configuration",
         description: "Main CLI server configuration (excluding sensitive data)",
+        mimeType: "application/json"
+      });
+
+      resources.push({
+        uri: "cli://validation-rules",
+        name: "Security Validation Rules",
+        description: "Complete security validation rules including blocked commands, arguments, operators, and path restrictions",
+        mimeType: "application/json"
+      });
+
+      resources.push({
+        uri: "cli://history-summary",
+        name: "Command History Summary",
+        description: "Summary of recent command executions with statistics and patterns",
+        mimeType: "application/json"
+      });
+
+      resources.push({
+        uri: "ssh://pool-status",
+        name: "SSH Connection Pool Status",
+        description: "Active SSH connections, pool statistics, and connection health",
         mimeType: "application/json"
       });
 
@@ -249,6 +278,155 @@ class CLIServer {
             uri,
             mimeType: "application/json",
             text: JSON.stringify(safeConfig, null, 2)
+          }]
+        };
+      }
+
+      if (uri === "cli://validation-rules") {
+        const securityManager = this.container.get<SecurityManager>('SecurityManager');
+        const securityConfig = configManager.getSecurity();
+
+        const validationRules = {
+          blocked_commands: {
+            description: "Commands that are blocked from execution (case-insensitive, checks all file extensions)",
+            commands: securityConfig.blockedCommands,
+            note: "Blocked commands are checked against basename with .exe, .cmd, .bat, .ps1, .vbs, etc."
+          },
+          blocked_arguments: {
+            description: "Argument patterns that are blocked (regex-based, case-insensitive)",
+            patterns: securityConfig.blockedArguments,
+            note: "Each argument is checked independently against these patterns"
+          },
+          blocked_operators: {
+            description: "Shell operators blocked per shell (including Unicode variants and zero-width characters)",
+            powershell: config.shells.powershell.blockedOperators,
+            cmd: config.shells.cmd.blockedOperators,
+            gitbash: config.shells.gitbash.blockedOperators,
+            note: "Includes detection of Unicode homoglyphs (｜, ； , ＆) and zero-width characters"
+          },
+          path_restrictions: {
+            description: "Working directory restrictions",
+            enabled: securityConfig.restrictWorkingDirectory,
+            allowed_paths: securityConfig.allowedPaths,
+            note: "Paths are canonicalized (symlinks resolved) before validation to prevent TOCTOU attacks"
+          },
+          length_limits: {
+            description: "Command length restrictions",
+            max_command_length: securityConfig.maxCommandLength,
+            note: "Commands exceeding this length are rejected before execution"
+          },
+          timeout_settings: {
+            description: "Command timeout settings",
+            command_timeout_seconds: securityConfig.commandTimeout,
+            note: "Commands are automatically terminated after this duration"
+          },
+          dangerous_characters: {
+            description: "Characters that are always blocked",
+            blocked: ["null bytes (\\0)", "control characters (except \\n, \\t)"],
+            note: "These are blocked in addition to shell operators"
+          },
+          redirection_blocking: {
+            description: "File redirection operators blocked",
+            operators: [">", "<", ">>", "2>", "2>&1"],
+            note: "Blocked in addition to shell operators for extra security"
+          },
+          validation_pipeline: {
+            description: "Multi-stage validation order (fail-fast)",
+            stages: [
+              "1. Shell operator check (highest priority)",
+              "2. Command parsing (handles quotes, escapes, detects unclosed quotes)",
+              "3. Command blocking (basename case-insensitive with all extensions)",
+              "4. Argument blocking (regex-based, case-insensitive)",
+              "5. Length check (command must be ≤ maxCommandLength)",
+              "6. Working directory validation (if restrictWorkingDirectory=true)"
+            ]
+          }
+        };
+
+        return {
+          contents: [{
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(validationRules, null, 2)
+          }]
+        };
+      }
+
+      if (uri === "cli://history-summary") {
+        const historyManager = this.container.get<HistoryManager>('HistoryManager');
+        const history = historyManager.getAll();
+
+        // Calculate statistics
+        const totalCommands = history.length;
+        const successfulCommands = history.filter((h: CommandHistoryEntry) => h.exitCode === 0).length;
+        const failedCommands = history.filter((h: CommandHistoryEntry) => h.exitCode !== 0).length;
+        const validationFailures = history.filter((h: CommandHistoryEntry) => h.exitCode === -2).length;
+        const executionFailures = history.filter((h: CommandHistoryEntry) => h.exitCode === -1).length;
+
+        // Get recent commands (last 10)
+        const recentCommands = history.slice(-10).reverse().map((h: CommandHistoryEntry) => ({
+          command: h.command,
+          timestamp: h.timestamp,
+          exitCode: h.exitCode,
+          status: h.exitCode === 0 ? 'success' : h.exitCode === -2 ? 'validation_failure' : 'execution_failure'
+        }));
+
+        // Find most common commands
+        const commandCounts: Record<string, number> = {};
+        history.forEach((h: CommandHistoryEntry) => {
+          const cmd = h.command.split(' ')[0]; // Get first word (command name)
+          commandCounts[cmd] = (commandCounts[cmd] || 0) + 1;
+        });
+        const mostCommon = Object.entries(commandCounts)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 5)
+          .map(([cmd, count]) => ({ command: cmd, count }));
+
+        // Find most common errors
+        const errorCounts: Record<number, number> = {};
+        history.filter((h: CommandHistoryEntry) => h.exitCode !== 0).forEach((h: CommandHistoryEntry) => {
+          errorCounts[h.exitCode] = (errorCounts[h.exitCode] || 0) + 1;
+        });
+        const commonErrors = Object.entries(errorCounts)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 5)
+          .map(([code, count]) => ({ exitCode: parseInt(code), count }));
+
+        const summary = {
+          statistics: {
+            total_commands: totalCommands,
+            successful_commands: successfulCommands,
+            failed_commands: failedCommands,
+            validation_failures: validationFailures,
+            execution_failures: executionFailures,
+            success_rate: totalCommands > 0 ? ((successfulCommands / totalCommands) * 100).toFixed(1) + '%' : 'N/A'
+          },
+          recent_commands: recentCommands,
+          most_common_commands: mostCommon,
+          most_common_errors: commonErrors,
+          history_enabled: historyManager.isEnabled(),
+          max_history_size: 1000, // from config
+          current_history_size: totalCommands
+        };
+
+        return {
+          contents: [{
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(summary, null, 2)
+          }]
+        };
+      }
+
+      if (uri === "ssh://pool-status") {
+        const sshPool = this.container.get<SSHConnectionPool>('SSHConnectionPool');
+        const poolStats = sshPool.getPoolStats();
+
+        return {
+          contents: [{
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify(poolStats, null, 2)
           }]
         };
       }

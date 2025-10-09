@@ -73,12 +73,46 @@ export class ValidateCommandTool extends BaseTool {
       return this.success(JSON.stringify(result, null, 2));
     } catch (error) {
       // Validation failed - this is expected behavior for dry-run
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Determine what type of validation failed and provide guidance
+      let guidance = '';
+      let suggestedTool = 'check_security_config';
+      let suggestedArgs: Record<string, any> = {};
+
+      if (errorMessage.includes('blocked command')) {
+        guidance = 'Command is blocked. Check the blockedCommands list in your configuration.';
+        suggestedArgs = { category: 'commands' };
+      } else if (errorMessage.includes('operator') || errorMessage.includes('blocked operator')) {
+        guidance = 'Shell operators are blocked. Use PowerShell cmdlets or break into multiple commands.';
+        suggestedArgs = { category: 'operators' };
+      } else if (errorMessage.includes('not in allowed paths') || errorMessage.includes('outside allowed paths')) {
+        guidance = 'Working directory is outside allowedPaths. Add the path to your config or disable restrictWorkingDirectory.';
+        suggestedTool = 'validate_config';
+        suggestedArgs = { show_merge_details: true };
+      } else if (errorMessage.includes('exceeds')) {
+        guidance = 'Command exceeds maxCommandLength. Shorten the command or increase the limit.';
+        suggestedArgs = { category: 'limits' };
+      } else if (errorMessage.includes('argument')) {
+        guidance = 'Command contains blocked arguments. Check the blockedArguments list in your configuration.';
+        suggestedArgs = { category: 'commands' };
+      } else {
+        guidance = 'Command failed validation. Check security settings.';
+        suggestedArgs = { category: 'all' };
+      }
+
       const result = {
         valid: false,
         shell,
         command,
         workingDir: workingDir || 'default (current directory)',
-        reason: error instanceof Error ? error.message : String(error)
+        reason: errorMessage,
+        guidance,
+        next_steps: {
+          recommended_tool: suggestedTool,
+          tool_args: suggestedArgs,
+          why: 'This tool will show you the specific security rules that are blocking your command.'
+        }
       };
 
       // Return as success (the validation itself succeeded, the command just wouldn't be allowed)
