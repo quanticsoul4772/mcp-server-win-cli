@@ -138,4 +138,30 @@ export class ConfigManager {
   getMaxHistorySize(): number {
     return this.config.security.maxHistorySize;
   }
+
+  /**
+   * Get a specific config value by path (dot notation)
+   *
+   * @param path - Configuration path (e.g., 'security.maxCommandLength')
+   * @returns Config value at path or undefined if not found
+   *
+   * @example
+   * ```typescript
+   * const timeout = configManager.getConfigValue('security.commandTimeout');
+   * const shellEnabled = configManager.getConfigValue('shells.powershell.enabled');
+   * ```
+   */
+  getConfigValue(path: string): any {
+    const parts = path.split('.');
+    let value: any = this.config;
+
+    for (const part of parts) {
+      if (value === undefined || value === null) {
+        return undefined;
+      }
+      value = value[part];
+    }
+
+    return value;
+  }
 }

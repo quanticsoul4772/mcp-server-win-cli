@@ -20,6 +20,7 @@ import { ConfigManager } from './services/ConfigManager.js';
 import { SecurityManager } from './services/SecurityManager.js';
 import { CommandExecutor } from './services/CommandExecutor.js';
 import { HistoryManager } from './services/HistoryManager.js';
+import { EnvironmentManager } from './services/EnvironmentManager.js';
 import { ExecuteCommandTool } from './tools/command/ExecuteCommandTool.js';
 import { ReadCommandHistoryTool } from './tools/command/ReadCommandHistoryTool.js';
 import { SSHExecuteTool } from './tools/ssh/SSHExecuteTool.js';
@@ -36,6 +37,10 @@ import { ExplainExitCodeTool } from './tools/diagnostics/ExplainExitCodeTool.js'
 import { ValidateConfigTool } from './tools/diagnostics/ValidateConfigTool.js';
 import { ReadSystemInfoTool } from './tools/diagnostics/ReadSystemInfoTool.js';
 import { TestConnectionTool } from './tools/diagnostics/TestConnectionTool.js';
+import { ReadEnvironmentVariableTool } from './tools/diagnostics/ReadEnvironmentVariableTool.js';
+import { ListEnvironmentVariablesTool } from './tools/diagnostics/ListEnvironmentVariablesTool.js';
+import { GetConfigValueTool } from './tools/diagnostics/GetConfigValueTool.js';
+import { ReloadConfigTool } from './tools/diagnostics/ReloadConfigTool.js';
 import { ReadCurrentDirectoryTool } from './tools/system/ReadCurrentDirectoryTool.js';
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
@@ -88,11 +93,13 @@ class CLIServer {
     const securityManager = new SecurityManager(config, blockedCommands, configPath);
     const historyManager = new HistoryManager(config.security.maxHistorySize, config.security.logCommands);
     const commandExecutor = new CommandExecutor(config, config.security.allowedPaths, configPath);
+    const environmentManager = new EnvironmentManager(configManager);
 
     this.container.registerInstance('ConfigManager', configManager);
     this.container.registerInstance('SecurityManager', securityManager);
     this.container.registerInstance('HistoryManager', historyManager);
     this.container.registerInstance('CommandExecutor', commandExecutor);
+    this.container.registerInstance('EnvironmentManager', environmentManager);
 
     // Initialize SSH pool
     this.sshPool = new SSHConnectionPool(config.ssh.strictHostKeyChecking);
@@ -127,6 +134,10 @@ class CLIServer {
     this.toolRegistry.register(new ValidateConfigTool(this.container));
     this.toolRegistry.register(new ReadSystemInfoTool(this.container));
     this.toolRegistry.register(new TestConnectionTool(this.container));
+    this.toolRegistry.register(new ReadEnvironmentVariableTool(this.container));
+    this.toolRegistry.register(new ListEnvironmentVariablesTool(this.container));
+    this.toolRegistry.register(new GetConfigValueTool(this.container));
+    this.toolRegistry.register(new ReloadConfigTool(this.container));
 
     // Register system tools
     this.toolRegistry.register(new ReadCurrentDirectoryTool(this.container));

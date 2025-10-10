@@ -10,3 +10,7 @@ export { ExplainExitCodeTool } from './ExplainExitCodeTool.js';
 export { ValidateConfigTool } from './ValidateConfigTool.js';
 export { ReadSystemInfoTool } from './ReadSystemInfoTool.js';
 export { TestConnectionTool } from './TestConnectionTool.js';
+export { ReadEnvironmentVariableTool } from './ReadEnvironmentVariableTool.js';
+export { ListEnvironmentVariablesTool } from './ListEnvironmentVariablesTool.js';
+export { GetConfigValueTool } from './GetConfigValueTool.js';
+export { ReloadConfigTool } from './ReloadConfigTool.js';
