@@ -31,6 +31,10 @@ import { UpdateSSHConnectionTool } from './tools/ssh/UpdateSSHConnectionTool.js'
 import { DeleteSSHConnectionTool } from './tools/ssh/DeleteSSHConnectionTool.js';
 import { ReadSSHPoolStatusTool } from './tools/ssh/ReadSSHPoolStatusTool.js';
 import { ValidateSSHConnectionTool } from './tools/ssh/ValidateSSHConnectionTool.js';
+import { SFTPUploadTool } from './tools/ssh/SFTPUploadTool.js';
+import { SFTPDownloadTool } from './tools/ssh/SFTPDownloadTool.js';
+import { SFTPListDirectoryTool } from './tools/ssh/SFTPListDirectoryTool.js';
+import { SFTPDeleteFileTool } from './tools/ssh/SFTPDeleteFileTool.js';
 import { CheckSecurityConfigTool } from './tools/diagnostics/CheckSecurityConfigTool.js';
 import { ValidateCommandTool } from './tools/diagnostics/ValidateCommandTool.js';
 import { ExplainExitCodeTool } from './tools/diagnostics/ExplainExitCodeTool.js';
@@ -131,6 +135,10 @@ class CLIServer {
     this.toolRegistry.register(new DeleteSSHConnectionTool(this.container));
     this.toolRegistry.register(new ReadSSHPoolStatusTool(this.container));
     this.toolRegistry.register(new ValidateSSHConnectionTool(this.container));
+    this.toolRegistry.register(new SFTPUploadTool(this.container));
+    this.toolRegistry.register(new SFTPDownloadTool(this.container));
+    this.toolRegistry.register(new SFTPListDirectoryTool(this.container));
+    this.toolRegistry.register(new SFTPDeleteFileTool(this.container));
 
     // Register diagnostic tools
     this.toolRegistry.register(new CheckSecurityConfigTool(this.container));

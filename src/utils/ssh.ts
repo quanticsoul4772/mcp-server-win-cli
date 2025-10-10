@@ -2,6 +2,7 @@ import { Client } from 'ssh2';
 import { SSHConnectionConfig } from '../types/config.js';
 import fs from 'fs/promises';
 import { getKnownHostsManager } from './knownHosts.js';
+import SftpClient from 'ssh2-sftp-client';
 
 export class SSHConnection {
   private client: Client;
@@ -261,6 +262,44 @@ export class SSHConnection {
 
   hasFailed(): boolean {
     return this.isFailed;
+  }
+
+  /**
+   * Get an SFTP client for file transfer operations
+   */
+  async getSFTPClient(): Promise<SftpClient> {
+    this.lastActivity = Date.now();
+
+    // Check connection and attempt reconnect if needed
+    if (!this.isConnected) {
+      await this.connect();
+    }
+
+    const sftp = new SftpClient();
+
+    // Prepare connection config
+    const connectionConfig: any = {
+      host: this.config.host,
+      port: this.config.port,
+      username: this.config.username,
+    };
+
+    if (this.config.password) {
+      connectionConfig.password = this.config.password;
+    } else if (this.config.privateKeyPath) {
+      try {
+        connectionConfig.privateKey = await fs.readFile(this.config.privateKeyPath);
+      } catch (error) {
+        throw new Error(`Failed to read private key: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    await sftp.connect(connectionConfig);
+    return sftp;
+  }
+
+  getClient(): Client {
+    return this.client;
   }
 }
 
