@@ -11,6 +11,14 @@
 
 ## What's New in v0.3.0
 
+### Phase 5 Enhancements (Latest)
+- **Environment & Configuration**: Secure environment variable access, config value retrieval
+- **System Monitoring**: CPU usage, disk space, DNS lookup, network connectivity testing
+- **SSH File Transfer**: SFTP upload/download/list/delete operations
+- **Background Jobs**: Async command execution with streaming output, batch command execution
+- **Total Tools**: 34 (17 original + 17 new Phase 5 tools)
+
+### Core Security Features
 - Enhanced security: Fixed critical vulnerabilities (path traversal, command injection, race conditions)
 - SSH host key verification: Prevents MITM attacks with Trust On First Use (TOFU) mode
 - Information protection: Error message sanitization prevents disclosure of internal paths
@@ -81,9 +89,12 @@ The server uses a layered architecture with dependency injection for maintainabi
 - SecurityManager: Multi-stage command validation pipeline
 - CommandExecutor: Process spawning and timeout management
 - HistoryManager: Command history tracking with size limits
+- EnvironmentManager: Secure environment variable access with blocklist/allowlist
+- JobManager: Background job execution with lifecycle management
+- SSHConnectionPool: SSH connection management with LRU eviction
 
 **Presentation Layer:**
-- 13 MCP tools organized by category (command execution, SSH operations, diagnostics, system info)
+- 34 MCP tools organized by category (command execution, SSH operations, diagnostics, system info)
 - All tools extend BaseTool abstract class
 - Tools use dependency injection to access services
 
@@ -379,96 +390,62 @@ The configuration file is divided into three main sections: `security`, `shells`
 
 ### Tools
 
-- **execute_command**
+The server provides 34 MCP tools organized into 4 categories:
 
-  - Execute a command in the specified shell
-  - Inputs:
-    - `shell` (string): Shell to use ("powershell", "cmd", or "gitbash")
-    - `command` (string): Command to execute
-    - `workingDir` (optional string): Working directory
-    - `timeout` (optional number): Command timeout in seconds (overrides config default)
-  - Returns command output as text, or error message if execution fails
+#### Command Execution (6 tools)
 
-- **read_command_history**
+- **execute_command** - Execute a command in PowerShell, CMD, or Git Bash
+- **read_command_history** - Get history of executed commands with outputs and exit codes
+- **start_background_job** - Start a command as a background job (async execution)
+- **get_job_status** - Get status and metadata for a background job
+- **get_job_output** - Retrieve output from a background job with streaming support
+- **execute_batch** - Execute multiple commands sequentially with stop-on-error mode
 
-  - Get the history of executed commands
-  - Input: `limit` (optional number)
-  - Returns timestamped command history with outputs
+#### SSH Operations (12 tools)
 
-- **ssh_execute**
+- **ssh_execute** - Execute command on remote SSH host
+- **ssh_disconnect** - Close SSH connection
+- **create_ssh_connection** - Add new SSH connection to config
+- **read_ssh_connections** - List all configured SSH connections
+- **update_ssh_connection** - Modify existing SSH connection
+- **delete_ssh_connection** - Remove SSH connection from config
+- **read_ssh_pool_status** - Get SSH connection pool status and health
+- **validate_ssh_connection** - Test SSH config and connectivity
+- **sftp_upload** - Upload file to remote host via SFTP
+- **sftp_download** - Download file from remote host via SFTP
+- **sftp_list_directory** - List files/directories on remote host
+- **sftp_delete** - Delete file or directory on remote host
 
-  - Execute a command on a remote system via SSH
-  - Inputs:
-    - `connectionId` (string): ID of the SSH connection to use
-    - `command` (string): Command to execute
-  - Returns command output as text, or error message if execution fails
+#### Diagnostics & Configuration (10 tools)
 
-- **ssh_disconnect**
-  - Disconnect from an SSH server
-  - Input:
-    - `connectionId` (string): ID of the SSH connection to disconnect
-  - Returns confirmation message
+- **check_security_config** - Inspect security rules (commands, paths, operators, limits)
+- **validate_command** - Dry-run validation without execution
+- **explain_exit_code** - Get detailed explanation for exit codes
+- **validate_config** - Validate configuration file syntax
+- **read_environment_variable** - Read single environment variable (with security filtering)
+- **list_environment_variables** - List accessible environment variables
+- **get_config_value** - Get specific config value by dot notation path
+- **reload_config** - Validate and preview config reload
+- **dns_lookup** - Perform DNS lookups (A, AAAA, MX, TXT, NS, CNAME records)
+- **test_connectivity** - Test network connectivity with SSRF protection
 
-- **create_ssh_connection**
-  - Create a new SSH connection
-  - Inputs:
-    - `connectionId` (string): ID for the new SSH connection
-    - `connectionConfig` (object): Connection configuration details including host, port, username, and either password or privateKeyPath
-  - Returns confirmation message
+#### System Info & Monitoring (6 tools)
 
-- **read_ssh_connections**
-  - Read all configured SSH connections
-  - Returns a list of all SSH connections from the configuration
-
-- **update_ssh_connection**
-  - Update an existing SSH connection
-  - Inputs:
-    - `connectionId` (string): ID of the SSH connection to update
-    - `connectionConfig` (object): New connection configuration details
-  - Returns confirmation message
-
-- **delete_ssh_connection**
-  - Delete an SSH connection
-  - Input:
-    - `connectionId` (string): ID of the SSH connection to delete
-  - Returns confirmation message
-
-- **read_current_directory**
-  - Get the current working directory of the server
-  - Returns the current working directory path
-
-- **read_ssh_pool_status**
-  - Get the status and health of the SSH connection pool
-  - Returns active connections, pool statistics, and connection IDs
-
-- **validate_ssh_connection**
-  - Validate SSH connection configuration and test connectivity
-  - Input:
-    - `connectionConfig` (object): Connection configuration to validate (host, port, username, password or privateKeyPath)
-  - Returns validation result with detected shell type if successful
+- **read_current_directory** - Get current working directory
+- **read_system_info** - Get system information (OS, arch, hostname, uptime, memory)
+- **get_cpu_usage** - Get CPU usage with configurable sampling interval
+- **get_disk_space** - Get disk space for specific drives or all drives
+- **list_processes** - List running processes (disabled by default for security)
 
 ### Resources
 
-- **SSH Connections**
-  - URI format: `ssh://{connectionId}`
-  - Contains connection details with sensitive information masked
-  - One resource for each configured SSH connection
-  - Example: `ssh://raspberry-pi` shows configuration for the "raspberry-pi" connection
+The server exposes 5 MCP resources for configuration and status monitoring:
 
-- **SSH Configuration**
-  - URI: `ssh://config`
-  - Contains overall SSH configuration and all connections (with passwords masked)
-  - Shows settings like defaultTimeout, maxConcurrentSessions, and the list of connections
-
-- **Current Directory**
-  - URI: `cli://currentdir`
-  - Contains the current working directory of the CLI server
-  - Shows the path where commands will execute by default
-
-- **CLI Configuration**
-  - URI: `cli://config`
-  - Contains the CLI server configuration (excluding sensitive data)
-  - Shows security settings, shell configurations, and SSH settings
+- **ssh://{connectionId}** - Individual SSH connection details (passwords masked)
+- **ssh://config** - Complete SSH configuration with all connections
+- **cli://currentdir** - Current working directory of the CLI server
+- **cli://config** - CLI server configuration (sensitive data excluded)
+- **cli://background-jobs** - Status of all background command execution jobs
 
 ## Troubleshooting
 
