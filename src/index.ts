@@ -21,8 +21,13 @@ import { SecurityManager } from './services/SecurityManager.js';
 import { CommandExecutor } from './services/CommandExecutor.js';
 import { HistoryManager } from './services/HistoryManager.js';
 import { EnvironmentManager } from './services/EnvironmentManager.js';
+import { JobManager } from './services/JobManager.js';
 import { ExecuteCommandTool } from './tools/command/ExecuteCommandTool.js';
 import { ReadCommandHistoryTool } from './tools/command/ReadCommandHistoryTool.js';
+import { StartBackgroundJobTool } from './tools/command/StartBackgroundJobTool.js';
+import { GetJobStatusTool } from './tools/command/GetJobStatusTool.js';
+import { GetJobOutputTool } from './tools/command/GetJobOutputTool.js';
+import { ExecuteBatchTool } from './tools/command/ExecuteBatchTool.js';
 import { SSHExecuteTool } from './tools/ssh/SSHExecuteTool.js';
 import { SSHDisconnectTool } from './tools/ssh/SSHDisconnectTool.js';
 import { CreateSSHConnectionTool } from './tools/ssh/CreateSSHConnectionTool.js';
@@ -103,12 +108,14 @@ class CLIServer {
     const historyManager = new HistoryManager(config.security.maxHistorySize, config.security.logCommands);
     const commandExecutor = new CommandExecutor(config, config.security.allowedPaths, configPath);
     const environmentManager = new EnvironmentManager(configManager);
+    const jobManager = new JobManager(configManager);
 
     this.container.registerInstance('ConfigManager', configManager);
     this.container.registerInstance('SecurityManager', securityManager);
     this.container.registerInstance('HistoryManager', historyManager);
     this.container.registerInstance('CommandExecutor', commandExecutor);
     this.container.registerInstance('EnvironmentManager', environmentManager);
+    this.container.registerInstance('JobManager', jobManager);
 
     // Initialize SSH pool
     this.sshPool = new SSHConnectionPool(config.ssh.strictHostKeyChecking);
@@ -125,6 +132,10 @@ class CLIServer {
     // Register command tools
     this.toolRegistry.register(new ExecuteCommandTool(this.container));
     this.toolRegistry.register(new ReadCommandHistoryTool(this.container));
+    this.toolRegistry.register(new StartBackgroundJobTool(this.container));
+    this.toolRegistry.register(new GetJobStatusTool(this.container));
+    this.toolRegistry.register(new GetJobOutputTool(this.container));
+    this.toolRegistry.register(new ExecuteBatchTool(this.container));
 
     // Register SSH tools
     this.toolRegistry.register(new SSHExecuteTool(this.container));
@@ -215,6 +226,13 @@ class CLIServer {
         uri: "ssh://pool-status",
         name: "SSH Connection Pool Status",
         description: "Active SSH connections, pool statistics, and connection health",
+        mimeType: "application/json"
+      });
+
+      resources.push({
+        uri: "cli://background-jobs",
+        name: "Background Jobs",
+        description: "Status of all background command execution jobs",
         mimeType: "application/json"
       });
 
@@ -460,6 +478,38 @@ class CLIServer {
         };
       }
 
+      if (uri === "cli://background-jobs") {
+        const jobManager = this.container.get<JobManager>('JobManager');
+        const jobs = jobManager.getAllJobs();
+
+        const jobsData = jobs.map(job => ({
+          jobId: job.id,
+          shell: job.shell,
+          command: job.command,
+          status: job.status,
+          pid: job.pid,
+          startTime: new Date(job.startTime).toISOString(),
+          endTime: job.endTime ? new Date(job.endTime).toISOString() : null,
+          exitCode: job.exitCode ?? null,
+          outputSize: job.output.length
+        }));
+
+        return {
+          contents: [{
+            uri,
+            mimeType: "application/json",
+            text: JSON.stringify({
+              jobCount: jobs.length,
+              runningJobs: jobs.filter(j => j.status === 'running').length,
+              completedJobs: jobs.filter(j => j.status === 'completed').length,
+              failedJobs: jobs.filter(j => j.status === 'failed').length,
+              timedOutJobs: jobs.filter(j => j.status === 'timeout').length,
+              jobs: jobsData
+            }, null, 2)
+          }]
+        };
+      }
+
       throw new McpError(
         ErrorCode.InvalidRequest,
         `Unknown resource URI: ${uri}`
@@ -497,6 +547,12 @@ class CLIServer {
   }
 
   async cleanup() {
+    // Cleanup background jobs
+    const jobManager = this.container.get<JobManager>('JobManager');
+    if (jobManager) {
+      jobManager.cleanup();
+    }
+
     // Close SSH pool
     if (this.sshPool) {
       this.sshPool.closeAll();
