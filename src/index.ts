@@ -41,7 +41,12 @@ import { ReadEnvironmentVariableTool } from './tools/diagnostics/ReadEnvironment
 import { ListEnvironmentVariablesTool } from './tools/diagnostics/ListEnvironmentVariablesTool.js';
 import { GetConfigValueTool } from './tools/diagnostics/GetConfigValueTool.js';
 import { ReloadConfigTool } from './tools/diagnostics/ReloadConfigTool.js';
+import { DnsLookupTool } from './tools/diagnostics/DnsLookupTool.js';
+import { TestConnectivityTool } from './tools/diagnostics/TestConnectivityTool.js';
 import { ReadCurrentDirectoryTool } from './tools/system/ReadCurrentDirectoryTool.js';
+import { GetCpuUsageTool } from './tools/system/GetCpuUsageTool.js';
+import { GetDiskSpaceTool } from './tools/system/GetDiskSpaceTool.js';
+import { ListProcessesTool } from './tools/system/ListProcessesTool.js';
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
 
@@ -138,9 +143,14 @@ class CLIServer {
     this.toolRegistry.register(new ListEnvironmentVariablesTool(this.container));
     this.toolRegistry.register(new GetConfigValueTool(this.container));
     this.toolRegistry.register(new ReloadConfigTool(this.container));
+    this.toolRegistry.register(new DnsLookupTool(this.container));
+    this.toolRegistry.register(new TestConnectivityTool(this.container));
 
     // Register system tools
     this.toolRegistry.register(new ReadCurrentDirectoryTool(this.container));
+    this.toolRegistry.register(new GetCpuUsageTool(this.container));
+    this.toolRegistry.register(new GetDiskSpaceTool(this.container));
+    this.toolRegistry.register(new ListProcessesTool(this.container));
   }
 
   private setupHandlers(): void {

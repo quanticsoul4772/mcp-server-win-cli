@@ -14,3 +14,5 @@ export { ReadEnvironmentVariableTool } from './ReadEnvironmentVariableTool.js';
 export { ListEnvironmentVariablesTool } from './ListEnvironmentVariablesTool.js';
 export { GetConfigValueTool } from './GetConfigValueTool.js';
 export { ReloadConfigTool } from './ReloadConfigTool.js';
+export { DnsLookupTool } from './DnsLookupTool.js';
+export { TestConnectivityTool } from './TestConnectivityTool.js';
