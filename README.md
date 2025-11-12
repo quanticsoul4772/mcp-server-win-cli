@@ -11,21 +11,23 @@
 
 ## What's New in v0.3.0
 
-### Phase 5 Enhancements (Latest)
-- **Environment & Configuration**: Secure environment variable access, config value retrieval
-- **System Monitoring**: CPU usage, disk space, DNS lookup, network connectivity testing
-- **SSH File Transfer**: SFTP upload/download/list/delete operations
-- **Background Jobs**: Async command execution with streaming output, batch command execution
-- **Total Tools**: 34 (17 original + 17 new Phase 5 tools)
+**New Capabilities:**
+- SFTP file transfer operations (upload, download, list, delete)
+- WSL path support for SFTP tools (converts /mnt/c/ and \\wsl.localhost\ paths)
+- Background job execution with streaming output
+- Batch command execution
+- System monitoring (CPU usage, disk space)
+- Network diagnostics (DNS lookup, connectivity testing)
+- Environment variable access with security filtering
+- Configuration value retrieval
 
-### Core Security Features
-- Enhanced security: Fixed critical vulnerabilities (path traversal, command injection, race conditions)
-- SSH host key verification: Prevents MITM attacks with Trust On First Use (TOFU) mode
-- Information protection: Error message sanitization prevents disclosure of internal paths
-- Smart SSH: Auto-detection of remote shell types with proper validation
-- Resource management: Connection pool limits, automatic cleanup, exponential backoff
-- Improved config: Secure deep merge preserves security settings
-- Better logging: Audit trail with periodic cleanup
+**Security Improvements:**
+- Fixed path traversal, command injection, and race condition vulnerabilities
+- SSH host key verification with Trust On First Use (TOFU)
+- Error message sanitization
+- Remote shell type auto-detection with validation
+- Connection pool limits with automatic cleanup
+- Secure configuration merge that preserves security settings
 
 >[!IMPORTANT]
 > This MCP server provides direct access to your system's command line interface and remote systems via SSH. When enabled, it grants access to your files, environment variables, command execution capabilities, and remote server management. Review and restrict allowed paths and SSH connections, enable directory restrictions, and configure command blocks. See [Configuration](#configuration) for details.

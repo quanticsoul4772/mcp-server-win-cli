@@ -155,6 +155,14 @@ We recommend:
    - Allowed paths revealing directory structure
    - Always use restrictive file permissions (Windows: use NTFS permissions)
 
+4. **SFTP and WSL Path Operations**: SFTP file transfer and WSL path support introduce additional considerations:
+   - **WSL Path Normalization**: WSL paths (`/mnt/c/`, `\\wsl.localhost\`) are normalized to Windows paths before operations
+   - **Command Injection Protection**: Distribution names and Unix paths are validated to prevent command injection via `wsl` commands
+   - **Path Traversal**: All paths are validated against `allowedPaths` after normalization
+   - **WSL Dependency**: WSL path operations require WSL to be installed; unavailability results in clear error messages
+   - **File Permissions**: Downloaded files inherit permissions from parent directory; verify appropriate access controls
+   - **Remote File Access**: SFTP operations access remote filesystems; ensure remote hosts are trusted
+
 ### Best Practices for Users
 
 1. **Restrict Allowed Paths**: Use the most restrictive `allowedPaths` possible for your use case
@@ -200,5 +208,5 @@ Thank you for helping keep the Windows CLI MCP Server and its users safe!
 
 ---
 
-**Last Updated**: 2025-10-08
+**Last Updated**: 2025-11-11
 **Version**: 0.3.0
