@@ -85,13 +85,22 @@ describe('wslPaths', () => {
     });
 
     it('handles WSL not available gracefully', async () => {
-      // This test is skipped due to Jest ES module mocking limitations
-      // The checkWSLAvailable() function properly handles WSL unavailability
-      // by catching errors from execAsync('wsl --status') and returning false
-      // This is verified through manual testing and code inspection
-
-      // The security validations above (distribution name, Unix path) are the
-      // critical tests for preventing command injection attacks
+      // Integration test: actually calls WSL, result depends on system state
+      try {
+        await normalizeLocalPath('/home/user/file');
+        // If WSL is available and has a default distribution, this might succeed
+        // That's fine - we're just verifying it doesn't crash
+      } catch (error) {
+        // If WSL is unavailable, verify the error message is helpful
+        expect(error instanceof Error).toBe(true);
+        if (error instanceof Error) {
+          // Should either be "WSL not available" or a conversion error
+          expect(
+            error.message.includes('WSL is not installed') ||
+            error.message.includes('Failed to convert Unix path')
+          ).toBe(true);
+        }
+      }
     });
   });
 });
