@@ -25,12 +25,34 @@ export class JobManager {
   private readonly maxJobs: number = 20;
   private readonly maxOutputSize: number = 1024 * 1024; // 1MB per job
   private nextJobId: number = 1;
+  private cleanupTimer: NodeJS.Timeout | null = null;
 
   constructor(private configManager: ConfigManager) {
     // Periodic cleanup of completed jobs older than 1 hour
-    setInterval(() => {
+    this.cleanupTimer = setInterval(() => {
       this.cleanupOldJobs();
     }, 10 * 60 * 1000); // 10 minutes
+  }
+
+  /**
+   * Stop the cleanup timer and release resources
+   */
+  stopCleanup(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
+
+  /**
+   * Safely append output to job with truncation to prevent race conditions
+   */
+  private appendOutput(job: Job, output: string): void {
+    job.output += output;
+    // Truncate if too large (keep most recent output)
+    if (job.output.length > this.maxOutputSize) {
+      job.output = job.output.substring(job.output.length - this.maxOutputSize);
+    }
   }
 
   /**
@@ -75,21 +97,11 @@ export class JobManager {
 
     // Capture output
     childProcess.stdout?.on('data', (data: Buffer) => {
-      const output = data.toString();
-      job.output += output;
-      // Truncate if too large
-      if (job.output.length > this.maxOutputSize) {
-        job.output = job.output.substring(job.output.length - this.maxOutputSize);
-      }
+      this.appendOutput(job, data.toString());
     });
 
     childProcess.stderr?.on('data', (data: Buffer) => {
-      const output = data.toString();
-      job.output += output;
-      // Truncate if too large
-      if (job.output.length > this.maxOutputSize) {
-        job.output = job.output.substring(job.output.length - this.maxOutputSize);
-      }
+      this.appendOutput(job, data.toString());
     });
 
     // Handle completion

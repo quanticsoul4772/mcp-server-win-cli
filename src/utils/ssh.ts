@@ -78,19 +78,21 @@ export class SSHConnection {
         `for ${this.config.host} in ${Math.round(totalDelay)}ms`
       );
 
-      this.reconnectTimer = setTimeout(async () => {
-        console.error(`Attempting to reconnect to ${this.config.host}...`);
-        try {
-          await this.connect();
-          console.error(`Successfully reconnected to ${this.config.host}`);
-          // Reset attempts on successful connection
-          this.reconnectAttempts = 0;
-        } catch (err) {
-          console.error(`Reconnection failed for ${this.config.host}:`, err instanceof Error ? err.message : String(err));
-          // scheduleReconnect will be called again by error handlers
-        }
+      this.reconnectTimer = setTimeout(() => {
+        this.attemptReconnect().catch(err => {
+          console.error(`Critical reconnection error for ${this.config.host}:`, err instanceof Error ? err.message : String(err));
+          // Error handlers on the client will trigger scheduleReconnect if needed
+        });
       }, totalDelay);
     }
+  }
+
+  private async attemptReconnect(): Promise<void> {
+    console.error(`Attempting to reconnect to ${this.config.host}...`);
+    await this.connect();
+    console.error(`Successfully reconnected to ${this.config.host}`);
+    // Reset attempts on successful connection
+    this.reconnectAttempts = 0;
   }
 
   async connect(): Promise<void> {

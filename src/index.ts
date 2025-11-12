@@ -551,6 +551,7 @@ class CLIServer {
     const jobManager = this.container.get<JobManager>('JobManager');
     if (jobManager) {
       jobManager.cleanup();
+      jobManager.stopCleanup();
     }
 
     // Close SSH pool
