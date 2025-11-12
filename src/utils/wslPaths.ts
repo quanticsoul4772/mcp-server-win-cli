@@ -8,6 +8,14 @@ const execAsync = promisify(exec);
 let wslAvailableCache: boolean | null = null;
 
 /**
+ * Reset WSL availability cache (for testing only)
+ * @internal
+ */
+export function _resetWSLCache(): void {
+  wslAvailableCache = null;
+}
+
+/**
  * Check if WSL is installed and available
  */
 async function checkWSLAvailable(): Promise<boolean> {
