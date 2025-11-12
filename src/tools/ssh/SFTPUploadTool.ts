@@ -2,6 +2,9 @@ import { BaseTool } from '../base/BaseTool.js';
 import type { ServiceContainer } from '../../server/ServiceContainer.js';
 import type { ToolResult } from '../base/types.js';
 import type { SSHConnectionPool } from '../../utils/ssh.js';
+import type { ConfigManager } from '../../services/ConfigManager.js';
+import { normalizeLocalPath, isWSLPath } from '../../utils/wslPaths.js';
+import { validatePathAllowed } from '../../utils/pathSecurity.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -63,30 +66,56 @@ Security: Validates local file exists. Remote path must be absolute.`,
     const { connectionId, localPath, remotePath } = args;
 
     try {
-      // Validate local path is absolute
-      if (!path.isAbsolute(localPath)) {
-        return this.validationError('Local path must be absolute');
+      // Validate local path format
+      const isWSL = isWSLPath(localPath);
+      const isWindowsAbsolute = path.isAbsolute(localPath);
+
+      if (!isWindowsAbsolute && !isWSL) {
+        return this.validationError('Local path must be absolute (Windows, WSL network, or Unix format)');
       }
 
-      // Validate remote path is absolute (Unix-style)
+      // Validate remote path is absolute
       if (!remotePath.startsWith('/')) {
         return this.validationError('Remote path must be absolute (start with /)');
       }
 
+      // Normalize WSL paths to Windows paths
+      let normalizedLocalPath: string;
+      try {
+        normalizedLocalPath = await normalizeLocalPath(localPath);
+      } catch (error) {
+        return this.error(
+          `Failed to normalize local path: ${error instanceof Error ? error.message : String(error)}`,
+          -1
+        );
+      }
+
+      // Security validation: Check normalized path against allowedPaths
+      const configManager = this.getService<ConfigManager>('ConfigManager');
+      const securityConfig = configManager.getSecurity();
+
+      const validation = await validatePathAllowed(
+        normalizedLocalPath,
+        securityConfig.allowedPaths,
+        securityConfig.restrictWorkingDirectory
+      );
+
+      if (!validation.allowed) {
+        return this.validationError(`${validation.error} Original path: ${localPath}`);
+      }
+
       // Check if local file exists
       try {
-        const stats = await fs.stat(localPath);
+        const stats = await fs.stat(normalizedLocalPath);
         if (!stats.isFile()) {
           return this.validationError('Local path must be a file, not a directory');
         }
       } catch (error: any) {
         if (error.code === 'ENOENT') {
-          return this.validationError(`Local file not found: ${localPath}`);
+          return this.validationError(`Local file not found: ${localPath} (normalized: ${normalizedLocalPath})`);
         }
         throw error;
       }
-
-      const configManager = this.getService<any>('ConfigManager');
       const sshConfig = configManager.getSSH();
 
       if (!sshConfig.connections[connectionId]) {
@@ -102,15 +131,16 @@ Security: Validates local file exists. Remote path must be absolute.`,
       try {
         const startTime = Date.now();
 
-        // Upload file
-        await sftp.put(localPath, remotePath, {});
+        // Upload file using normalized path
+        await sftp.put(normalizedLocalPath, remotePath, {});
 
         const duration = Date.now() - startTime;
-        const fileStats = await fs.stat(localPath);
+        const fileStats = await fs.stat(normalizedLocalPath);
 
         const result = {
           connectionId,
-          localPath,
+          localPath: localPath,
+          normalizedPath: normalizedLocalPath,
           remotePath,
           fileSize: fileStats.size,
           uploadDurationMs: duration,

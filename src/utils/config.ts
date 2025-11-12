@@ -169,18 +169,24 @@ function mergeConfigs(defaultConfig: ServerConfig, userConfig: Partial<ServerCon
     }
   }
 
+  // Allow user to explicitly disable argument blocking with empty array
+  if (userConfig.security?.blockedArguments !== undefined) {
+    merged.security.blockedArguments = userConfig.security.blockedArguments;
+  }
+
   // Ensure validatePath functions are preserved (they're functions, not serialized)
   for (const [key, shell] of Object.entries(merged.shells) as [keyof typeof merged.shells, ShellConfig][]) {
     if (!shell.validatePath) {
       shell.validatePath = defaultConfig.shells[key].validatePath;
     }
-    // Ensure blocked operators are merged (union of both lists)
-    if (shell.blockedOperators && defaultConfig.shells[key].blockedOperators) {
-      shell.blockedOperators = [...new Set([
-        ...defaultConfig.shells[key].blockedOperators!,
-        ...shell.blockedOperators
-      ])];
+    // Allow user to explicitly disable operator blocking with empty array
+    // If user config has blockedOperators defined (even as []), use it as-is
+    // Only merge if user config doesn't specify blockedOperators
+    if (userConfig.shells?.[key]?.blockedOperators !== undefined) {
+      // User explicitly set blockedOperators - use their value
+      shell.blockedOperators = userConfig.shells[key].blockedOperators || [];
     } else if (!shell.blockedOperators) {
+      // User didn't specify - use defaults
       shell.blockedOperators = defaultConfig.shells[key].blockedOperators;
     }
   }

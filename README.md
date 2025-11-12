@@ -330,6 +330,39 @@ The configuration file is divided into three main sections: `security`, `shells`
 }
 ```
 
+### WSL Path Support
+
+The SFTP tools (`sftp_download`, `sftp_upload`) support downloading and uploading files to Windows Subsystem for Linux (WSL) paths:
+
+**Supported path formats:**
+- `\\wsl.localhost\Ubuntu\home\user\file` - WSL network path (recommended)
+- `\\wsl$\Ubuntu\home\user\file` - WSL legacy network path
+- `/home/user/file` - Unix absolute path (uses default distribution)
+- `/mnt/c/Users/user/file` - WSL mount path format
+
+**Requirements:**
+- WSL must be installed: `wsl --install`
+- At least one distribution must be configured
+- Include WSL paths in `allowedPaths` configuration
+
+**Example configuration:**
+```json
+{
+  "security": {
+    "allowedPaths": [
+      "C:\\Users\\username",
+      "\\\\wsl.localhost\\Ubuntu\\home\\username"
+    ],
+    "restrictWorkingDirectory": true
+  }
+}
+```
+
+**Troubleshooting WSL paths:**
+- If you get "WSL is not installed" error, run `wsl --install` and restart
+- If you get "Path not allowed" error, add the WSL path to `allowedPaths`
+- Use `\\wsl.localhost\` paths for better compatibility with Windows tools
+
 #### SSH Configuration
 
 ```json

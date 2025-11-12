@@ -2,6 +2,9 @@ import { BaseTool } from '../base/BaseTool.js';
 import type { ServiceContainer } from '../../server/ServiceContainer.js';
 import type { ToolResult } from '../base/types.js';
 import type { SSHConnectionPool } from '../../utils/ssh.js';
+import type { ConfigManager } from '../../services/ConfigManager.js';
+import { normalizeLocalPath, isWSLPath } from '../../utils/wslPaths.js';
+import { validatePathAllowed } from '../../utils/pathSecurity.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -63,18 +66,46 @@ Security: Local path must be absolute. Creates parent directories if needed.`,
     const { connectionId, remotePath, localPath } = args;
 
     try {
-      // Validate local path is absolute
-      if (!path.isAbsolute(localPath)) {
-        return this.validationError('Local path must be absolute');
+      // Validate local path format
+      const isWSL = isWSLPath(localPath);
+      const isWindowsAbsolute = path.isAbsolute(localPath);
+
+      if (!isWindowsAbsolute && !isWSL) {
+        return this.validationError('Local path must be absolute (Windows, WSL network, or Unix format)');
       }
 
-      // Validate remote path is absolute (Unix-style)
+      // Validate remote path is absolute
       if (!remotePath.startsWith('/')) {
         return this.validationError('Remote path must be absolute (start with /)');
       }
 
-      // Create parent directory if it doesn't exist
-      const parentDir = path.dirname(localPath);
+      // Normalize WSL paths to Windows paths
+      let normalizedLocalPath: string;
+      try {
+        normalizedLocalPath = await normalizeLocalPath(localPath);
+      } catch (error) {
+        return this.error(
+          `Failed to normalize local path: ${error instanceof Error ? error.message : String(error)}`,
+          -1
+        );
+      }
+
+      // Security validation: Check normalized path against allowedPaths
+      const configManager = this.getService<ConfigManager>('ConfigManager');
+      const securityConfig = configManager.getSecurity();
+
+      const parentDir = path.dirname(normalizedLocalPath);
+      const validation = await validatePathAllowed(
+        parentDir,
+        securityConfig.allowedPaths,
+        securityConfig.restrictWorkingDirectory
+      );
+
+      if (!validation.allowed) {
+        return this.validationError(`${validation.error} Original path: ${localPath}`);
+      }
+
+      // Create parent directory
       try {
         await fs.mkdir(parentDir, { recursive: true });
       } catch (error) {
@@ -83,8 +114,6 @@ Security: Local path must be absolute. Creates parent directories if needed.`,
           -1
         );
       }
-
-      const configManager = this.getService<any>('ConfigManager');
       const sshConfig = configManager.getSSH();
 
       if (!sshConfig.connections[connectionId]) {
@@ -100,16 +129,17 @@ Security: Local path must be absolute. Creates parent directories if needed.`,
       try {
         const startTime = Date.now();
 
-        // Download file
-        await sftp.get(remotePath, localPath, {});
+        // Download file using normalized path
+        await sftp.get(remotePath, normalizedLocalPath, {});
 
         const duration = Date.now() - startTime;
-        const fileStats = await fs.stat(localPath);
+        const fileStats = await fs.stat(normalizedLocalPath);
 
         const result = {
           connectionId,
           remotePath,
-          localPath,
+          localPath: localPath,
+          normalizedPath: normalizedLocalPath,
           fileSize: fileStats.size,
           downloadDurationMs: duration,
           timestamp: new Date().toISOString()
