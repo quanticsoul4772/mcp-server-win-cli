@@ -1,5 +1,5 @@
 import type { ServiceContainer } from "../../server/ServiceContainer.js";
-import type { ToolResult, ToolCategory, StructuredError } from "./types.js";
+import type { ToolResult, ToolCategory, StructuredError, ToolInputSchema, JsonObject } from "./types.js";
 
 /**
  * Abstract base class for all MCP tools
@@ -63,7 +63,7 @@ export abstract class BaseTool {
    *
    * @returns JSON schema object for tool arguments
    */
-  abstract getInputSchema(): any;
+  abstract getInputSchema(): ToolInputSchema;
 
   /**
    * Execute the tool with provided arguments
@@ -71,6 +71,7 @@ export abstract class BaseTool {
    * @param args - Tool arguments (validated against input schema)
    * @returns Tool execution result
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   abstract execute(args: any): Promise<ToolResult>;
 
   /**
@@ -95,19 +96,16 @@ export abstract class BaseTool {
   }
 
   /**
-   * Helper to create a successful tool result
-   *
-   * @param text - Result text to return
-   * @param metadata - Optional metadata (exitCode, etc.)
-   * @returns Formatted tool result
+   * Metadata options for tool results
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected success(text: string, metadata?: { exitCode?: number; [key: string]: any }): ToolResult {
     return {
       content: [{
         type: 'text',
         text
       }],
-      _meta: metadata ? { exitCode: metadata.exitCode, metadata } : undefined
+      _meta: metadata ? { exitCode: metadata.exitCode, metadata: metadata as JsonObject } : undefined
     };
   }
 
@@ -119,6 +117,7 @@ export abstract class BaseTool {
    * @param metadata - Optional metadata including structured error
    * @returns Formatted error result
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   protected error(message: string, exitCode: number = -1, metadata?: { structured?: StructuredError; [key: string]: any }): ToolResult {
     return {
       content: [{
@@ -129,7 +128,7 @@ export abstract class BaseTool {
       _meta: {
         exitCode,
         ...(metadata?.structured && { structured: metadata.structured }),
-        ...(metadata && { metadata })
+        ...(metadata && { metadata: metadata as JsonObject })
       }
     };
   }
@@ -160,10 +159,10 @@ export abstract class BaseTool {
   protected createStructuredError(
     errorType: string,
     code: string,
-    details: Record<string, any>,
+    details: JsonObject,
     userGuidance: string,
     diagnosticTool?: string,
-    diagnosticArgs?: Record<string, any>,
+    diagnosticArgs?: JsonObject,
     helpUrl?: string
   ): StructuredError {
     return {

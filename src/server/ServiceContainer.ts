@@ -1,4 +1,12 @@
 /**
+ * Internal singleton entry with lazy initialization
+ */
+interface SingletonEntry<T = unknown> {
+  factory: () => T;
+  instance: T | null;
+}
+
+/**
  * Lightweight Dependency Injection Container
  *
  * Provides service registration and resolution with:
@@ -26,9 +34,9 @@
  * ```
  */
 export class ServiceContainer {
-  private singletons: Map<string, any> = new Map();
-  private transients: Map<string, () => any> = new Map();
-  private instances: Map<string, any> = new Map();
+  private singletons: Map<string, SingletonEntry> = new Map();
+  private transients: Map<string, () => unknown> = new Map();
+  private instances: Map<string, unknown> = new Map();
 
   /**
    * Register a singleton service with lazy initialization
@@ -102,7 +110,7 @@ export class ServiceContainer {
 
     // Check singletons
     if (this.singletons.has(name)) {
-      const singleton = this.singletons.get(name);
+      const singleton = this.singletons.get(name)!;
       if (singleton.instance === null) {
         singleton.instance = singleton.factory();
       }

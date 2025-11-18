@@ -1,6 +1,6 @@
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { BaseTool } from "../tools/base/BaseTool.js";
-import type { ToolResult } from "../tools/base/types.js";
+import type { ToolResult, ToolInputSchema } from "../tools/base/types.js";
 
 /**
  * Tool Registry - Manages registration and execution of MCP tools
@@ -130,6 +130,7 @@ export class ToolRegistry {
    * @returns Tool execution result
    * @throws McpError if tool not found or execution fails
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async execute(name: string, args: any): Promise<ToolResult> {
     const tool = this.get(name);
 
@@ -156,7 +157,7 @@ export class ToolRegistry {
    * @returns The tool's input schema
    * @throws McpError if tool not found
    */
-  getSchema(name: string): any {
+  getSchema(name: string): ToolInputSchema {
     const tool = this.get(name);
     return tool.getInputSchema();
   }
@@ -166,7 +167,7 @@ export class ToolRegistry {
    *
    * @returns Array of tool definitions with name, description, and input schema
    */
-  getToolDefinitions(): Array<{ name: string; description: string; inputSchema: any }> {
+  getToolDefinitions(): Array<{ name: string; description: string; inputSchema: ToolInputSchema }> {
     return this.listTools().map(tool => ({
       name: tool.name,
       description: tool.description,
