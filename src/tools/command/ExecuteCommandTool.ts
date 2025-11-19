@@ -12,6 +12,7 @@ interface ExecuteCommandArgs {
   command: string;
   workingDir?: string;
   timeout?: number;
+  env?: Record<string, string>;
 }
 
 /**
@@ -33,6 +34,18 @@ Example usage (PowerShell):
   "shell": "powershell",
   "command": "Get-Process | Select-Object -First 5",
   "workingDir": "C:\\\\Users\\\\username"
+}
+\`\`\`
+
+Example usage with custom environment variables:
+\`\`\`json
+{
+  "shell": "powershell",
+  "command": "python -c \\"print('Hello 世界')\\"",
+  "env": {
+    "PYTHONIOENCODING": "utf-8",
+    "PYTHONUTF8": "1"
+  }
 }
 \`\`\`
 
@@ -80,6 +93,11 @@ Example usage (Git Bash):
         timeout: {
           type: 'number',
           description: 'Command timeout in seconds (overrides config default)'
+        },
+        env: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'Custom environment variables for command execution (optional). Example: {"PYTHONIOENCODING": "utf-8"}'
         }
       },
       required: ['shell', 'command']
@@ -87,7 +105,7 @@ Example usage (Git Bash):
   }
 
   async execute(args: ExecuteCommandArgs): Promise<ToolResult> {
-    const { shell, command, workingDir, timeout } = args;
+    const { shell, command, workingDir, timeout, env } = args;
 
     // Get services
     const securityManager = this.getService<SecurityManager>('SecurityManager');
@@ -95,15 +113,16 @@ Example usage (Git Bash):
     const historyManager = this.getService<HistoryManager>('HistoryManager');
 
     try {
-      // Stage 1-5: Multi-stage validation
-      securityManager.validateCommand(shell, command);
+      // Stage 1-6: Multi-stage validation (includes env var validation)
+      securityManager.validateCommand(shell, command, env);
 
-      // Execute command
+      // Execute command with environment variables
       const result = await commandExecutor.execute({
         shell,
         command,
         workingDir,
-        timeout
+        timeout,
+        env
       });
 
       // Log to history
@@ -128,7 +147,8 @@ Example usage (Git Bash):
       const isValidationError = errorMessage.includes('blocked') ||
                                 errorMessage.includes('exceeds') ||
                                 errorMessage.includes('not in allowed paths') ||
-                                errorMessage.includes('operator');
+                                errorMessage.includes('operator') ||
+                                errorMessage.includes('Environment variable');
       const exitCode = isValidationError ? -2 : -1;
 
       // Log failed command to history
@@ -193,7 +213,7 @@ Example usage (Git Bash):
             { show_merge_details: true },
             'https://github.com/quanticsoul4772/mcp-server-win-cli#issue-path-not-allowed-or-working-directory-outside-allowed-paths'
           );
-        } else if (errorMessage.includes('exceeds')) {
+        } else if (errorMessage.includes('exceeds') && !errorMessage.includes('Environment variable')) {
           structured = this.createStructuredError(
             'command_too_long',
             'SEC004',
@@ -204,6 +224,19 @@ Example usage (Git Bash):
             'Command exceeds maxCommandLength. Shorten the command or increase maxCommandLength in config.json.',
             'check_security_config',
             { category: 'limits' }
+          );
+        } else if (errorMessage.includes('Environment variable')) {
+          structured = this.createStructuredError(
+            'env_var_blocked',
+            'SEC005',
+            {
+              command: command,
+              shell: shell,
+              error: errorMessage
+            },
+            'Environment variable is blocked by security policy. Review blockedEnvVars in config.json or use check_security_config tool.',
+            'check_security_config',
+            { category: 'environment' }
           );
         }
       } else {

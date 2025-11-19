@@ -7,3 +7,16 @@ config.json
 .cursorrules
 .history
 CLAUDE.md
+
+# Test coverage
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp

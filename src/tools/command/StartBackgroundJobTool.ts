@@ -2,11 +2,13 @@ import { BaseTool } from '../base/BaseTool.js';
 import type { ServiceContainer } from '../../server/ServiceContainer.js';
 import type { ToolResult } from '../base/types.js';
 import type { JobManager } from '../../services/JobManager.js';
+import type { SecurityManager } from '../../services/SecurityManager.js';
 
 interface StartBackgroundJobArgs {
   shell: 'powershell' | 'cmd' | 'gitbash';
   command: string;
   timeout?: number;
+  env?: Record<string, string>;
 }
 
 /**
@@ -53,6 +55,11 @@ Returns job ID immediately. Use get_job_status to monitor progress.`,
           type: 'number',
           description: 'Job timeout in seconds (default: 300, max: 3600)',
           default: 300
+        },
+        env: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'Custom environment variables for command execution (optional)'
         }
       },
       required: ['shell', 'command']
@@ -60,7 +67,7 @@ Returns job ID immediately. Use get_job_status to monitor progress.`,
   }
 
   async execute(args: StartBackgroundJobArgs): Promise<ToolResult> {
-    const { shell, command, timeout = 300 } = args;
+    const { shell, command, timeout = 300, env } = args;
 
     try {
       // Validate timeout
@@ -68,8 +75,14 @@ Returns job ID immediately. Use get_job_status to monitor progress.`,
         return this.validationError('Timeout must be between 1 and 3600 seconds');
       }
 
+      // Validate environment variables if provided
+      if (env && Object.keys(env).length > 0) {
+        const securityManager = this.getService<SecurityManager>('SecurityManager');
+        securityManager.validateEnvironmentVariables(env);
+      }
+
       const jobManager = this.getService<JobManager>('JobManager');
-      const jobId = jobManager.startJob(shell, command, timeout);
+      const jobId = jobManager.startJob(shell, command, timeout, env);
 
       const result = {
         jobId,

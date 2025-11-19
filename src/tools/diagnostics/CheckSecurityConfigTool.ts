@@ -2,9 +2,10 @@ import { BaseTool } from '../base/BaseTool.js';
 import type { ServiceContainer } from '../../server/ServiceContainer.js';
 import type { ToolResult } from '../base/types.js';
 import type { SecurityManager } from '../../services/SecurityManager.js';
+import { EnvironmentManager } from '../../services/EnvironmentManager.js';
 
 interface CheckSecurityConfigArgs {
-  category?: 'all' | 'commands' | 'paths' | 'operators' | 'limits';
+  category?: 'all' | 'commands' | 'paths' | 'operators' | 'limits' | 'environment';
 }
 
 /**
@@ -28,7 +29,7 @@ export class CheckSecurityConfigTool extends BaseTool {
       properties: {
         category: {
           type: 'string',
-          enum: ['all', 'commands', 'paths', 'operators', 'limits'],
+          enum: ['all', 'commands', 'paths', 'operators', 'limits', 'environment'],
           description: 'Filter by configuration category (optional, default: all)'
         }
       },
@@ -73,7 +74,22 @@ export class CheckSecurityConfigTool extends BaseTool {
         case 'limits':
           result = {
             maxCommandLength: config.maxCommandLength,
-            commandTimeout: config.commandTimeout
+            commandTimeout: config.commandTimeout,
+            maxCustomEnvVars: config.maxCustomEnvVars ?? EnvironmentManager.getDefaultMaxCustomEnvVars(),
+            maxEnvVarValueLength: config.maxEnvVarValueLength ?? EnvironmentManager.getDefaultMaxEnvVarValueLength()
+          };
+          break;
+
+        case 'environment':
+          result = {
+            blockedEnvVars: config.blockedEnvVars ?? EnvironmentManager.getDefaultBlockedEnvVars(),
+            allowedEnvVars: config.allowedEnvVars ?? null,
+            mode: config.allowedEnvVars ? 'allowlist' : 'blocklist',
+            maxCustomEnvVars: config.maxCustomEnvVars ?? EnvironmentManager.getDefaultMaxCustomEnvVars(),
+            maxEnvVarValueLength: config.maxEnvVarValueLength ?? EnvironmentManager.getDefaultMaxEnvVarValueLength(),
+            note: config.allowedEnvVars
+              ? 'Allowlist mode: ONLY variables in allowedEnvVars can be set'
+              : 'Blocklist mode: variables matching blockedEnvVars patterns are blocked'
           };
           break;
 

@@ -32,8 +32,25 @@ const DEFAULT_BLOCKED_ENV_VARS = [
   // System Security
   'SSH_PRIVATE_KEY',
   'GPG_PASSPHRASE',
-  'ENCRYPTION_KEY'
+  'ENCRYPTION_KEY',
+
+  // System Path Variables (high-risk for privilege escalation)
+  'PATH',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH'
 ];
+
+/**
+ * Default maximum number of custom environment variables per command
+ */
+const DEFAULT_MAX_CUSTOM_ENV_VARS = 20;
+
+/**
+ * Default maximum length of environment variable values
+ */
+const DEFAULT_MAX_ENV_VAR_VALUE_LENGTH = 32768;
 
 /**
  * EnvironmentManager Service
@@ -61,8 +78,15 @@ export class EnvironmentManager {
   private readonly blockedVariables: Set<string>;
   private readonly allowedVariables?: Set<string>;
 
+  /**
+   * Create an EnvironmentManager instance
+   *
+   * @param configManager - ConfigManager for read-only access (optional for validation/merge only)
+   * @param blockedVariables - List of blocked variable patterns
+   * @param allowedVariables - Optional allowlist (if set, only these are allowed)
+   */
   constructor(
-    private readonly configManager: ConfigManager,
+    private readonly configManager: ConfigManager | null,
     blockedVariables: string[] = DEFAULT_BLOCKED_ENV_VARS,
     allowedVariables?: string[]
   ) {
@@ -198,5 +222,155 @@ export class EnvironmentManager {
    */
   public isAllowlistMode(): boolean {
     return this.allowedVariables !== undefined;
+  }
+
+  // ============================================================================
+  // Environment Variable Validation Methods (for command execution)
+  // ============================================================================
+
+  /**
+   * Validate environment variable name for security
+   *
+   * @param name - Variable name to validate
+   * @throws Error if variable is blocked or not allowed
+   */
+  public validateEnvVarName(name: string): void {
+    const upperName = name.toUpperCase();
+
+    // Allowlist mode: if allowlist exists, ONLY those variables can be set
+    if (this.allowedVariables) {
+      if (!this.allowedVariables.has(upperName)) {
+        throw new Error(`Environment variable "${name}" is not in allowlist`);
+      }
+      return;
+    }
+
+    // Blocklist mode: check if variable is blocked
+    if (this.blockedVariables.has(upperName)) {
+      throw new Error(`Environment variable "${name}" is blocked for security`);
+    }
+
+    // Check if variable name contains blocked patterns
+    for (const blocked of this.blockedVariables) {
+      if (upperName.includes(blocked)) {
+        throw new Error(
+          `Environment variable "${name}" matches blocked pattern "${blocked}"`
+        );
+      }
+    }
+  }
+
+  /**
+   * Validate environment variable value for security and sanity
+   *
+   * @param name - Variable name (for error messages)
+   * @param value - Variable value to validate
+   * @param maxLength - Maximum allowed value length
+   * @throws Error if value is invalid
+   */
+  public validateEnvVarValue(
+    name: string,
+    value: string,
+    maxLength: number = DEFAULT_MAX_ENV_VAR_VALUE_LENGTH
+  ): void {
+    // Check for null bytes (can cause issues with C-based programs)
+    if (value.includes('\0')) {
+      throw new Error(
+        `Environment variable "${name}" value contains null bytes which are not allowed`
+      );
+    }
+
+    // Check length
+    if (value.length > maxLength) {
+      throw new Error(
+        `Environment variable "${name}" value exceeds maximum length ` +
+        `(${value.length} > ${maxLength})`
+      );
+    }
+
+    // Check for dangerous control characters (except newline \n=0x0A and tab \t=0x09)
+    const dangerousChars = /[\x00-\x08\x0B\x0C\x0E-\x1F]/;
+    if (dangerousChars.test(value)) {
+      throw new Error(
+        `Environment variable "${name}" value contains dangerous control characters`
+      );
+    }
+  }
+
+  /**
+   * Validate multiple environment variables (names and values)
+   *
+   * @param vars - Record of environment variables to validate
+   * @param maxCount - Maximum number of variables allowed
+   * @param maxValueLength - Maximum length of each value
+   * @throws Error if any variable fails validation or count exceeds limit
+   */
+  public validateEnvVars(
+    vars: Record<string, string>,
+    maxCount: number = DEFAULT_MAX_CUSTOM_ENV_VARS,
+    maxValueLength: number = DEFAULT_MAX_ENV_VAR_VALUE_LENGTH
+  ): void {
+    const keys = Object.keys(vars);
+
+    if (keys.length > maxCount) {
+      throw new Error(
+        `Too many environment variables (${keys.length}). Maximum: ${maxCount}`
+      );
+    }
+
+    for (const key of keys) {
+      this.validateEnvVarName(key);
+      this.validateEnvVarValue(key, vars[key], maxValueLength);
+    }
+  }
+
+  /**
+   * Merge environment variables with proper precedence
+   *
+   * Order of precedence (lowest to highest):
+   * 1. System environment variables (process.env)
+   * 2. Shell default environment variables
+   * 3. User-provided environment variables
+   *
+   * @param shellDefaults - Default env vars from shell config
+   * @param userOverrides - User-provided env vars
+   * @returns Merged environment variables
+   */
+  public mergeEnvironmentVariables(
+    shellDefaults?: Record<string, string>,
+    userOverrides?: Record<string, string>
+  ): Record<string, string> {
+    return {
+      ...process.env as Record<string, string>,
+      ...(shellDefaults || {}),
+      ...(userOverrides || {})
+    };
+  }
+
+  /**
+   * Get default blocked environment variables
+   *
+   * @returns Array of default blocked variable patterns
+   */
+  public static getDefaultBlockedEnvVars(): string[] {
+    return [...DEFAULT_BLOCKED_ENV_VARS];
+  }
+
+  /**
+   * Get default max custom env vars limit
+   *
+   * @returns Default max count
+   */
+  public static getDefaultMaxCustomEnvVars(): number {
+    return DEFAULT_MAX_CUSTOM_ENV_VARS;
+  }
+
+  /**
+   * Get default max env var value length
+   *
+   * @returns Default max length
+   */
+  public static getDefaultMaxEnvVarValueLength(): number {
+    return DEFAULT_MAX_ENV_VAR_VALUE_LENGTH;
   }
 }

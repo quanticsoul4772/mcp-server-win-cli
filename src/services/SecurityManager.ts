@@ -8,6 +8,7 @@ import {
   getBlockedArgument
 } from '../utils/validation.js';
 import type { ServerConfig, ShellConfig } from '../types/config.js';
+import { EnvironmentManager } from './EnvironmentManager.js';
 
 /**
  * SecurityManager Service
@@ -44,12 +45,18 @@ export class SecurityManager {
    * 3. Command name blocking
    * 4. Argument blocking
    * 5. Length check
+   * 6. Environment variable validation (if provided)
    *
    * @param shellKey - Shell to execute in
    * @param command - Command string to validate
+   * @param envVars - Optional environment variables to validate
    * @throws Error if validation fails at any stage
    */
-  validateCommand(shellKey: keyof ServerConfig['shells'], command: string): void {
+  validateCommand(
+    shellKey: keyof ServerConfig['shells'],
+    command: string,
+    envVars?: Record<string, string>
+  ): void {
     const shellConfig = this.config.shells[shellKey];
 
     // Stage 1: Validate shell operators (pipes, redirects, etc.)
@@ -86,6 +93,44 @@ export class SecurityManager {
         `This protects against buffer overflow and resource exhaustion attacks.`
       );
     }
+
+    // Stage 6: Validate environment variables (if provided)
+    if (envVars && Object.keys(envVars).length > 0) {
+      this.validateEnvironmentVariables(envVars);
+    }
+  }
+
+  /**
+   * Validate environment variables against security policy
+   *
+   * @param envVars - Environment variables to validate
+   * @throws Error if any variable fails validation
+   */
+  validateEnvironmentVariables(envVars: Record<string, string>): void {
+    // Get configuration for env var limits
+    const maxCount = this.config.security.maxCustomEnvVars ??
+      EnvironmentManager.getDefaultMaxCustomEnvVars();
+    const maxValueLength = this.config.security.maxEnvVarValueLength ??
+      EnvironmentManager.getDefaultMaxEnvVarValueLength();
+
+    // Create EnvironmentManager with configured blocklist/allowlist
+    const blockedEnvVars = this.config.security.blockedEnvVars ??
+      EnvironmentManager.getDefaultBlockedEnvVars();
+    const allowedEnvVars = this.config.security.allowedEnvVars;
+
+    const envManager = new EnvironmentManager(
+      null, // ConfigManager not needed for validation
+      blockedEnvVars,
+      allowedEnvVars
+    );
+
+    try {
+      envManager.validateEnvVars(envVars, maxCount, maxValueLength);
+    } catch (error) {
+      throw new Error(
+        `Environment variable validation failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   /**
@@ -101,6 +146,10 @@ export class SecurityManager {
       allowedPaths: this.config.security.allowedPaths,
       restrictWorkingDirectory: this.config.security.restrictWorkingDirectory,
       commandTimeout: this.config.security.commandTimeout,
+      blockedEnvVars: this.config.security.blockedEnvVars,
+      allowedEnvVars: this.config.security.allowedEnvVars,
+      maxCustomEnvVars: this.config.security.maxCustomEnvVars,
+      maxEnvVarValueLength: this.config.security.maxEnvVarValueLength,
       shells: Object.entries(this.config.shells).map(([name, config]) => ({
         name,
         enabled: config.enabled,

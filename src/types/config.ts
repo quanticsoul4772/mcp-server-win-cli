@@ -8,6 +8,30 @@ export interface SecurityConfig {
   maxHistorySize: number;
   commandTimeout: number;
   // enableInjectionProtection removed - always enforced for security
+
+  /**
+   * Environment variables blocked from being set (security)
+   * Prevents credential leakage and privilege escalation
+   */
+  blockedEnvVars?: string[];
+
+  /**
+   * If set, ONLY these environment variables can be modified
+   * If undefined, blocklist mode is used
+   */
+  allowedEnvVars?: string[];
+
+  /**
+   * Maximum number of custom environment variables per command
+   * Default: 20
+   */
+  maxCustomEnvVars?: number;
+
+  /**
+   * Maximum length of environment variable values in bytes
+   * Default: 32768
+   */
+  maxEnvVarValueLength?: number;
 }
 
 export interface ShellConfig {
@@ -16,6 +40,11 @@ export interface ShellConfig {
   args: string[];
   validatePath?: (dir: string) => boolean;
   blockedOperators?: string[]; // Added for shell-specific operator restrictions
+  /**
+   * Default environment variables to set for this shell
+   * Merged with system env and user-provided env vars
+   */
+  defaultEnv?: Record<string, string>;
 }
 
 /**

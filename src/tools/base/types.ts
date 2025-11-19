@@ -60,10 +60,12 @@ export interface SchemaProperty {
   default?: JsonValue;
   minimum?: number;
   maximum?: number;
+  minItems?: number;
+  maxItems?: number;
   items?: { type: string };
   properties?: Record<string, SchemaProperty>;
   required?: readonly string[];
-  additionalProperties?: boolean;
+  additionalProperties?: boolean | { type: string };
 }
 
 /**

@@ -287,4 +287,154 @@ describe('ConfigManager', () => {
       expect(manager.getMaxHistorySize()).toBe(500);
     });
   });
+
+  describe('Config-time environment variable validation', () => {
+    it('should throw if defaultEnv contains blocked env var', () => {
+      const configWithBlockedDefaultEnv = {
+        ...mockConfig,
+        security: {
+          ...mockConfig.security,
+          blockedEnvVars: ['BLOCKED_VAR']
+        },
+        shells: {
+          ...mockConfig.shells,
+          powershell: {
+            ...mockConfig.shells.powershell,
+            defaultEnv: {
+              BLOCKED_VAR: 'value'
+            }
+          }
+        }
+      };
+
+      expect(() => {
+        new ConfigManager(configWithBlockedDefaultEnv, null);
+      }).toThrow(/contains blocked environment variable/i);
+    });
+
+    it('should throw if defaultEnv matches blocked pattern', () => {
+      const configWithPatternMatch = {
+        ...mockConfig,
+        security: {
+          ...mockConfig.security,
+          blockedEnvVars: ['PASSWORD']
+        },
+        shells: {
+          ...mockConfig.shells,
+          powershell: {
+            ...mockConfig.shells.powershell,
+            defaultEnv: {
+              MY_PASSWORD_VAR: 'secret'
+            }
+          }
+        }
+      };
+
+      expect(() => {
+        new ConfigManager(configWithPatternMatch, null);
+      }).toThrow(/matches blocked pattern/i);
+    });
+
+    it('should throw if defaultEnv value exceeds max length', () => {
+      const longValue = 'a'.repeat(40000);
+      const configWithLongValue = {
+        ...mockConfig,
+        security: {
+          ...mockConfig.security,
+          maxEnvVarValueLength: 1000
+        },
+        shells: {
+          ...mockConfig.shells,
+          powershell: {
+            ...mockConfig.shells.powershell,
+            defaultEnv: {
+              LONG_VAR: longValue
+            }
+          }
+        }
+      };
+
+      expect(() => {
+        new ConfigManager(configWithLongValue, null);
+      }).toThrow(/exceeds maximum length/i);
+    });
+
+    it('should throw if defaultEnv value contains null bytes', () => {
+      const configWithNullBytes = {
+        ...mockConfig,
+        shells: {
+          ...mockConfig.shells,
+          powershell: {
+            ...mockConfig.shells.powershell,
+            defaultEnv: {
+              BAD_VAR: 'value\x00withnull'
+            }
+          }
+        }
+      };
+
+      expect(() => {
+        new ConfigManager(configWithNullBytes, null);
+      }).toThrow(/null bytes/i);
+    });
+
+    it('should allow valid defaultEnv configuration', () => {
+      const configWithValidDefaultEnv = {
+        ...mockConfig,
+        shells: {
+          ...mockConfig.shells,
+          powershell: {
+            ...mockConfig.shells.powershell,
+            defaultEnv: {
+              PYTHONIOENCODING: 'utf-8',
+              PYTHONUTF8: '1'
+            }
+          }
+        }
+      };
+
+      expect(() => {
+        new ConfigManager(configWithValidDefaultEnv, null);
+      }).not.toThrow();
+    });
+
+    it('should use default blocked vars when not specified in config', () => {
+      // PATH is in the default blocked list
+      const configWithPathInDefaultEnv = {
+        ...mockConfig,
+        shells: {
+          ...mockConfig.shells,
+          powershell: {
+            ...mockConfig.shells.powershell,
+            defaultEnv: {
+              PATH: '/custom/path'
+            }
+          }
+        }
+      };
+
+      expect(() => {
+        new ConfigManager(configWithPathInDefaultEnv, null);
+      }).toThrow(/blocked/i);
+    });
+
+    it('should throw if defaultEnv value contains control characters', () => {
+      const configWithControlChars = {
+        ...mockConfig,
+        shells: {
+          ...mockConfig.shells,
+          powershell: {
+            ...mockConfig.shells.powershell,
+            defaultEnv: {
+              BAD_VAR: 'value\x01withcontrol'
+            }
+          }
+        }
+      };
+
+      expect(() => {
+        new ConfigManager(configWithControlChars, null);
+      }).toThrow(/control characters/i);
+    });
+  });
 });

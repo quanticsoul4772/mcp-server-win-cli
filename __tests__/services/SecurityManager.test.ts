@@ -275,4 +275,116 @@ describe('SecurityManager', () => {
       }).toThrow(/Command 'rm' is blocked/i);
     });
   });
+
+  describe('validateEnvironmentVariables()', () => {
+    test('should validate environment variables in command validation', () => {
+      const envVars = {
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1'
+      };
+
+      // Should not throw for valid env vars
+      expect(() => {
+        security.validateCommand('powershell', 'python script.py', envVars);
+      }).not.toThrow();
+    });
+
+    test('should reject blocked environment variables', () => {
+      const envVars = {
+        AWS_SECRET_KEY: 'secret'
+      };
+
+      expect(() => {
+        security.validateCommand('powershell', 'python script.py', envVars);
+      }).toThrow(/Environment variable validation failed/i);
+    });
+
+    test('should reject environment variables with null bytes', () => {
+      const envVars = {
+        SAFE_VAR: 'value\x00with\x00nulls'
+      };
+
+      expect(() => {
+        security.validateCommand('powershell', 'python script.py', envVars);
+      }).toThrow(/null bytes/i);
+    });
+
+    test('should skip validation when no env vars provided', () => {
+      // Should not throw when env vars are undefined
+      expect(() => {
+        security.validateCommand('powershell', 'Get-Process');
+      }).not.toThrow();
+
+      // Should not throw when env vars are empty object
+      expect(() => {
+        security.validateCommand('powershell', 'Get-Process', {});
+      }).not.toThrow();
+    });
+
+    test('should validate standalone environment variables', () => {
+      const envVars = {
+        CUSTOM_VAR: 'value'
+      };
+
+      // Valid vars should not throw
+      expect(() => {
+        security.validateEnvironmentVariables(envVars);
+      }).not.toThrow();
+    });
+
+    test('should reject blocked vars in standalone validation', () => {
+      const envVars = {
+        PASSWORD: 'secret'
+      };
+
+      expect(() => {
+        security.validateEnvironmentVariables(envVars);
+      }).toThrow(/blocked/i);
+    });
+  });
+
+  describe('getConfig() with environment fields', () => {
+    test('should include environment variable config fields', () => {
+      const config = security.getConfig();
+
+      // Should include the new environment fields
+      expect(config).toHaveProperty('blockedEnvVars');
+      expect(config).toHaveProperty('allowedEnvVars');
+      expect(config).toHaveProperty('maxCustomEnvVars');
+      expect(config).toHaveProperty('maxEnvVarValueLength');
+    });
+
+    test('should return undefined for unconfigured env fields', () => {
+      const config = security.getConfig();
+
+      // Default mock config doesn't have these set
+      expect(config.blockedEnvVars).toBeUndefined();
+      expect(config.allowedEnvVars).toBeUndefined();
+    });
+
+    test('should return configured env values when present', () => {
+      const configWithEnvVars = {
+        ...mockConfig,
+        security: {
+          ...mockConfig.security,
+          blockedEnvVars: ['CUSTOM_BLOCKED'],
+          allowedEnvVars: ['SAFE_VAR'],
+          maxCustomEnvVars: 10,
+          maxEnvVarValueLength: 1000
+        }
+      };
+
+      const securityWithEnv = new SecurityManager(
+        configWithEnvVars,
+        blockedCommands,
+        null
+      );
+
+      const config = securityWithEnv.getConfig();
+      expect(config.blockedEnvVars).toEqual(['CUSTOM_BLOCKED']);
+      expect(config.allowedEnvVars).toEqual(['SAFE_VAR']);
+      expect(config.maxCustomEnvVars).toBe(10);
+      expect(config.maxEnvVarValueLength).toBe(1000);
+    });
+  });
 });

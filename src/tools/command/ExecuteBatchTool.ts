@@ -2,12 +2,14 @@ import { BaseTool } from '../base/BaseTool.js';
 import type { ServiceContainer } from '../../server/ServiceContainer.js';
 import type { ToolResult } from '../base/types.js';
 import type { CommandExecutor } from '../../services/CommandExecutor.js';
+import type { SecurityManager } from '../../services/SecurityManager.js';
 
 interface ExecuteBatchArgs {
   shell: 'powershell' | 'cmd' | 'gitbash';
   commands: string[];
   stopOnError?: boolean;
   timeout?: number;
+  env?: Record<string, string>;
 }
 
 /**
@@ -67,6 +69,11 @@ Executes commands in order. If stopOnError=true, stops on first failure.`,
           type: 'number',
           description: 'Timeout per command in seconds (default: 60)',
           default: 60
+        },
+        env: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'Custom environment variables applied to all commands (optional)'
         }
       },
       required: ['shell', 'commands']
@@ -74,7 +81,7 @@ Executes commands in order. If stopOnError=true, stops on first failure.`,
   }
 
   async execute(args: ExecuteBatchArgs): Promise<ToolResult> {
-    const { shell, commands, stopOnError = true, timeout = 60 } = args;
+    const { shell, commands, stopOnError = true, timeout = 60, env } = args;
 
     try {
       // Validate
@@ -90,6 +97,12 @@ Executes commands in order. If stopOnError=true, stops on first failure.`,
         return this.validationError('Timeout must be between 1 and 600 seconds');
       }
 
+      // Validate environment variables if provided
+      if (env && Object.keys(env).length > 0) {
+        const securityManager = this.getService<SecurityManager>('SecurityManager');
+        securityManager.validateEnvironmentVariables(env);
+      }
+
       const commandExecutor = this.getService<CommandExecutor>('CommandExecutor');
       const results: any[] = [];
       let overallSuccess = true;
@@ -103,7 +116,8 @@ Executes commands in order. If stopOnError=true, stops on first failure.`,
           const execResult = await commandExecutor.execute({
             shell,
             command,
-            timeout
+            timeout,
+            env
           });
 
           const commandResult = {

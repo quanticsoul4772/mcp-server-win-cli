@@ -1,5 +1,6 @@
 import type { ConfigManager } from './ConfigManager.js';
 import { spawn, type ChildProcess } from 'child_process';
+import { EnvironmentManager } from './EnvironmentManager.js';
 
 export interface Job {
   id: string;
@@ -57,8 +58,18 @@ export class JobManager {
 
   /**
    * Start a new background job
+   *
+   * @param shell - Shell to use
+   * @param command - Command to execute
+   * @param timeout - Timeout in seconds
+   * @param env - Optional custom environment variables
    */
-  startJob(shell: 'powershell' | 'cmd' | 'gitbash', command: string, timeout: number = 300): string {
+  startJob(
+    shell: 'powershell' | 'cmd' | 'gitbash',
+    command: string,
+    timeout: number = 300,
+    env?: Record<string, string>
+  ): string {
     // Check job limit
     if (this.jobs.size >= this.maxJobs) {
       this.cleanupOldJobs();
@@ -86,10 +97,22 @@ export class JobManager {
 
     this.jobs.set(jobId, job);
 
-    // Spawn process
+    // Merge environment variables: system < shell defaults < user overrides
+    const envManager = new EnvironmentManager(
+      null, // ConfigManager not needed for merge
+      config.security.blockedEnvVars || EnvironmentManager.getDefaultBlockedEnvVars(),
+      config.security.allowedEnvVars
+    );
+
+    const mergedEnv = envManager.mergeEnvironmentVariables(
+      shellConfig.defaultEnv,
+      env
+    );
+
+    // Spawn process with merged environment
     const childProcess = spawn(shellConfig.command, [...shellConfig.args, command], {
       windowsHide: true,
-      env: process.env
+      env: mergedEnv
     });
 
     job.pid = childProcess.pid;

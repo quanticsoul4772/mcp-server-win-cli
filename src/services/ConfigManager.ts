@@ -1,4 +1,5 @@
 import type { ServerConfig } from '../types/config.js';
+import { EnvironmentManager } from './EnvironmentManager.js';
 
 /**
  * ConfigManager Service
@@ -25,7 +26,80 @@ export class ConfigManager {
   constructor(
     private readonly config: ServerConfig,
     private readonly configPath: string | null
-  ) {}
+  ) {
+    // Validate defaultEnv at config load time
+    this.validateDefaultEnv();
+  }
+
+  /**
+   * Validate all shell defaultEnv configurations
+   * Consolidates name validation (blocklist) and value validation (length, null bytes, control chars)
+   *
+   * @throws Error if any defaultEnv contains invalid variables
+   */
+  private validateDefaultEnv(): void {
+    const blockedEnvVars = new Set(
+      (this.config.security.blockedEnvVars || EnvironmentManager.getDefaultBlockedEnvVars())
+        .map(v => v.toUpperCase())
+    );
+    const maxLength = this.config.security.maxEnvVarValueLength ||
+      EnvironmentManager.getDefaultMaxEnvVarValueLength();
+
+    // Regex for dangerous control characters (same as EnvironmentManager)
+    const dangerousChars = /[\x00-\x08\x0B\x0C\x0E-\x1F]/;
+
+    for (const [shellName, shellConfig] of Object.entries(this.config.shells)) {
+      if (!shellConfig.defaultEnv) continue;
+
+      for (const [envVarName, value] of Object.entries(shellConfig.defaultEnv)) {
+        const upperName = envVarName.toUpperCase();
+
+        // Validate name: exact match against blocklist
+        if (blockedEnvVars.has(upperName)) {
+          throw new Error(
+            `Configuration error: Shell "${shellName}" defaultEnv contains blocked ` +
+            `environment variable "${envVarName}". Remove it from defaultEnv or ` +
+            `remove "${envVarName}" from security.blockedEnvVars.`
+          );
+        }
+
+        // Validate name: pattern match against blocklist
+        for (const blocked of blockedEnvVars) {
+          if (upperName.includes(blocked)) {
+            throw new Error(
+              `Configuration error: Shell "${shellName}" defaultEnv variable ` +
+              `"${envVarName}" matches blocked pattern "${blocked}". ` +
+              `Remove it from defaultEnv or update security.blockedEnvVars.`
+            );
+          }
+        }
+
+        // Validate value: length check
+        if (value.length > maxLength) {
+          throw new Error(
+            `Configuration error: Shell "${shellName}" defaultEnv variable ` +
+            `"${envVarName}" value exceeds maximum length (${value.length} > ${maxLength}).`
+          );
+        }
+
+        // Validate value: null bytes
+        if (value.includes('\0')) {
+          throw new Error(
+            `Configuration error: Shell "${shellName}" defaultEnv variable ` +
+            `"${envVarName}" contains null bytes which are not allowed.`
+          );
+        }
+
+        // Validate value: dangerous control characters
+        if (dangerousChars.test(value)) {
+          throw new Error(
+            `Configuration error: Shell "${shellName}" defaultEnv variable ` +
+            `"${envVarName}" contains dangerous control characters.`
+          );
+        }
+      }
+    }
+  }
 
   /**
    * Get the full server configuration

@@ -213,9 +213,15 @@ export class SSHConnection {
     return this.detectedShellType;
   }
 
-  private async executeCommandInternal(command: string): Promise<{ output: string; exitCode: number }> {
+  private async executeCommandInternal(
+    command: string,
+    env?: Record<string, string>
+  ): Promise<{ output: string; exitCode: number }> {
     return new Promise((resolve, reject) => {
-      this.client.exec(command, (err, stream) => {
+      // Prepare exec options with environment variables if provided
+      const execOptions = env ? { env } : {};
+
+      this.client.exec(command, execOptions, (err, stream) => {
         if (err) {
           reject(err);
           return;
@@ -242,7 +248,10 @@ export class SSHConnection {
     });
   }
 
-  async executeCommand(command: string): Promise<{ output: string; exitCode: number }> {
+  async executeCommand(
+    command: string,
+    env?: Record<string, string>
+  ): Promise<{ output: string; exitCode: number }> {
     this.lastActivity = Date.now();
 
     // Check connection and attempt reconnect if needed
@@ -255,7 +264,7 @@ export class SSHConnection {
       await this.detectShellType();
     }
 
-    return this.executeCommandInternal(command);
+    return this.executeCommandInternal(command, env);
   }
 
   disconnect(): void {

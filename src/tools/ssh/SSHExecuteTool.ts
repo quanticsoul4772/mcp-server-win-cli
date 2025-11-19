@@ -2,11 +2,13 @@ import { BaseTool } from '../base/BaseTool.js';
 import type { ServiceContainer } from '../../server/ServiceContainer.js';
 import type { ToolResult } from '../base/types.js';
 import type { ConfigManager } from '../../services/ConfigManager.js';
+import type { SecurityManager } from '../../services/SecurityManager.js';
 import { SSHConnectionPool } from '../../utils/ssh.js';
 
 interface SSHExecuteArgs {
   connectionId: string;
   command: string;
+  env?: Record<string, string>;
 }
 
 /**
@@ -65,6 +67,11 @@ Configuration required in config.json:
         command: {
           type: 'string',
           description: 'Command to execute'
+        },
+        env: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'Custom environment variables for remote command execution (optional). Note: SSH server must allow AcceptEnv for these variables.'
         }
       },
       required: ['connectionId', 'command']
@@ -72,7 +79,7 @@ Configuration required in config.json:
   }
 
   async execute(args: SSHExecuteArgs): Promise<ToolResult> {
-    const { connectionId, command } = args;
+    const { connectionId, command, env } = args;
 
     try {
       const configManager = this.getService<ConfigManager>('ConfigManager');
@@ -82,9 +89,15 @@ Configuration required in config.json:
         return this.error(`SSH connection '${connectionId}' not found in configuration`, -1);
       }
 
+      // Validate environment variables if provided
+      if (env && Object.keys(env).length > 0) {
+        const securityManager = this.getService<SecurityManager>('SecurityManager');
+        securityManager.validateEnvironmentVariables(env);
+      }
+
       const sshPool = this.getService<SSHConnectionPool>('SSHConnectionPool');
       const connection = await sshPool.getConnection(connectionId, sshConfig.connections[connectionId]);
-      const result = await connection.executeCommand(command);
+      const result = await connection.executeCommand(command, env);
 
       return this.success(result.output, { exitCode: result.exitCode });
     } catch (error) {

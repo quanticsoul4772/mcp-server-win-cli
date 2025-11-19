@@ -296,7 +296,28 @@ The configuration file is divided into three main sections: `security`, `shells`
     "maxHistorySize": 1000,
 
     // Timeout for command execution in seconds (default: 30)
-    "commandTimeout": 30
+    "commandTimeout": 30,
+
+    // Environment variable security controls
+    // Blocked patterns - variables matching these are blocked (default includes sensitive vars)
+    "blockedEnvVars": [
+      "AWS_SECRET_ACCESS_KEY",
+      "PASSWORD",
+      "API_KEY",
+      "TOKEN",
+      "SECRET",
+      "PATH",           // Prevents PATH manipulation attacks
+      "LD_PRELOAD"      // Prevents library injection attacks
+    ],
+
+    // Optional: If set, ONLY these variables can be modified (allowlist mode)
+    // "allowedEnvVars": ["PYTHONIOENCODING", "PYTHONUTF8", "NODE_ENV"],
+
+    // Maximum number of custom environment variables per command (default: 20)
+    "maxCustomEnvVars": 20,
+
+    // Maximum length of environment variable values (default: 32768)
+    "maxEnvVarValueLength": 32768
   }
 }
 ```
@@ -314,7 +335,12 @@ The configuration file is divided into three main sections: `security`, `shells`
       // Default arguments for the shell
       "args": ["-NoProfile", "-NonInteractive", "-Command"],
       // Optional: Specify which command operators to block
-      "blockedOperators": ["&", "|", ";", "`"]  // Block all command chaining
+      "blockedOperators": ["&", "|", ";", "`"],  // Block all command chaining
+      // Optional: Default environment variables for this shell
+      "defaultEnv": {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1"
+      }
     },
     "cmd": {
       "enabled": true,
@@ -451,9 +477,10 @@ The server provides 34 MCP tools organized into 4 categories:
 - **sftp_list_directory** - List files/directories on remote host
 - **sftp_delete** - Delete file or directory on remote host
 
-#### Diagnostics & Configuration (10 tools)
+#### Diagnostics & Configuration (12 tools)
 
-- **check_security_config** - Inspect security rules (commands, paths, operators, limits)
+- **check_security_config** - Inspect security rules (commands, paths, operators, limits, environment)
+- **test_connection** - Test shell connectivity and basic functionality
 - **validate_command** - Dry-run validation without execution
 - **explain_exit_code** - Get detailed explanation for exit codes
 - **validate_config** - Validate configuration file syntax
@@ -464,10 +491,9 @@ The server provides 34 MCP tools organized into 4 categories:
 - **dns_lookup** - Perform DNS lookups (A, AAAA, MX, TXT, NS, CNAME records)
 - **test_connectivity** - Test network connectivity with SSRF protection
 
-#### System Info & Monitoring (6 tools)
+#### System Info & Monitoring (4 tools)
 
 - **read_current_directory** - Get current working directory
-- **read_system_info** - Get system information (OS, arch, hostname, uptime, memory)
 - **get_cpu_usage** - Get CPU usage with configurable sampling interval
 - **get_disk_space** - Get disk space for specific drives or all drives
 - **list_processes** - List running processes (disabled by default for security)
@@ -861,6 +887,30 @@ The command took longer than the configured `commandTimeout` (default: 30 second
 - Break long-running operations into smaller commands
 - Use background jobs or scheduled tasks for very long operations
 - Monitor command execution time using `read_command_history`
+
+### Using Custom Environment Variables
+
+You can pass custom environment variables to commands for encoding, locale, or other settings:
+
+```json
+{
+  "tool": "execute_command",
+  "arguments": {
+    "shell": "powershell",
+    "command": "python -c \"print('Hello 世界')\"",
+    "env": {
+      "PYTHONIOENCODING": "utf-8",
+      "PYTHONUTF8": "1"
+    }
+  }
+}
+```
+
+**Security notes:**
+- Sensitive variables (AWS keys, passwords, tokens) are blocked by default
+- PATH and LD_PRELOAD are blocked to prevent privilege escalation
+- Use `check_security_config` with `"category": "environment"` to see blocked variables
+- In allowlist mode, only explicitly allowed variables can be set
 
 **Related Configuration:**
 See [Security Settings](#security-settings) for `commandTimeout` and [SSH Configuration](#ssh-configuration) for `defaultTimeout`.

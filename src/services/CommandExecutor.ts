@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { canonicalizePath, isPathAllowed } from '../utils/validation.js';
 import { sanitizePathError, createUserFriendlyError } from '../utils/errorSanitizer.js';
 import type { ServerConfig } from '../types/config.js';
+import { EnvironmentManager } from './EnvironmentManager.js';
 
 /**
  * Result of command execution
@@ -21,6 +22,11 @@ export interface CommandExecutionOptions {
   command: string;
   workingDir?: string;
   timeout?: number;
+  /**
+   * Custom environment variables to set for this command
+   * These are merged with system env and shell defaults
+   */
+  env?: Record<string, string>;
 }
 
 /**
@@ -103,7 +109,7 @@ export class CommandExecutor {
    * @throws Error if execution fails
    */
   async execute(options: CommandExecutionOptions): Promise<CommandExecutionResult> {
-    const { shell, command, workingDir: userWorkingDir, timeout } = options;
+    const { shell, command, workingDir: userWorkingDir, timeout, env: userEnv } = options;
 
     // Validate and canonicalize working directory
     const workingDir = await this.validateWorkingDirectory(userWorkingDir, userWorkingDir);
@@ -111,15 +117,31 @@ export class CommandExecutor {
     const shellConfig = this.config.shells[shell];
     const timeoutSeconds = timeout || this.config.security.commandTimeout;
 
+    // Merge environment variables: system < shell defaults < user overrides
+    const envManager = new EnvironmentManager(
+      null, // ConfigManager not needed for merge
+      this.config.security.blockedEnvVars || EnvironmentManager.getDefaultBlockedEnvVars(),
+      this.config.security.allowedEnvVars
+    );
+
+    const mergedEnv = envManager.mergeEnvironmentVariables(
+      shellConfig.defaultEnv,
+      userEnv
+    );
+
     return new Promise((resolve, reject) => {
       let shellProcess: ReturnType<typeof spawn>;
 
-      // Spawn shell process
+      // Spawn shell process with merged environment
       try {
         shellProcess = spawn(
           shellConfig.command,
           [...shellConfig.args, command],
-          { cwd: workingDir, stdio: ['pipe', 'pipe', 'pipe'] }
+          {
+            cwd: workingDir,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: mergedEnv
+          }
         );
       } catch (err) {
         reject(new Error(
