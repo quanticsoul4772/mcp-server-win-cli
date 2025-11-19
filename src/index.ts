@@ -22,40 +22,7 @@ import { CommandExecutor } from './services/CommandExecutor.js';
 import { HistoryManager } from './services/HistoryManager.js';
 import { EnvironmentManager } from './services/EnvironmentManager.js';
 import { JobManager } from './services/JobManager.js';
-import { ExecuteCommandTool } from './tools/command/ExecuteCommandTool.js';
-import { ReadCommandHistoryTool } from './tools/command/ReadCommandHistoryTool.js';
-import { StartBackgroundJobTool } from './tools/command/StartBackgroundJobTool.js';
-import { GetJobStatusTool } from './tools/command/GetJobStatusTool.js';
-import { GetJobOutputTool } from './tools/command/GetJobOutputTool.js';
-import { ExecuteBatchTool } from './tools/command/ExecuteBatchTool.js';
-import { SSHExecuteTool } from './tools/ssh/SSHExecuteTool.js';
-import { SSHDisconnectTool } from './tools/ssh/SSHDisconnectTool.js';
-import { CreateSSHConnectionTool } from './tools/ssh/CreateSSHConnectionTool.js';
-import { ReadSSHConnectionsTool } from './tools/ssh/ReadSSHConnectionsTool.js';
-import { UpdateSSHConnectionTool } from './tools/ssh/UpdateSSHConnectionTool.js';
-import { DeleteSSHConnectionTool } from './tools/ssh/DeleteSSHConnectionTool.js';
-import { ReadSSHPoolStatusTool } from './tools/ssh/ReadSSHPoolStatusTool.js';
-import { ValidateSSHConnectionTool } from './tools/ssh/ValidateSSHConnectionTool.js';
-import { SFTPUploadTool } from './tools/ssh/SFTPUploadTool.js';
-import { SFTPDownloadTool } from './tools/ssh/SFTPDownloadTool.js';
-import { SFTPListDirectoryTool } from './tools/ssh/SFTPListDirectoryTool.js';
-import { SFTPDeleteFileTool } from './tools/ssh/SFTPDeleteFileTool.js';
-import { CheckSecurityConfigTool } from './tools/diagnostics/CheckSecurityConfigTool.js';
-import { ValidateCommandTool } from './tools/diagnostics/ValidateCommandTool.js';
-import { ExplainExitCodeTool } from './tools/diagnostics/ExplainExitCodeTool.js';
-import { ValidateConfigTool } from './tools/diagnostics/ValidateConfigTool.js';
-import { ReadSystemInfoTool } from './tools/diagnostics/ReadSystemInfoTool.js';
-import { TestConnectionTool } from './tools/diagnostics/TestConnectionTool.js';
-import { ReadEnvironmentVariableTool } from './tools/diagnostics/ReadEnvironmentVariableTool.js';
-import { ListEnvironmentVariablesTool } from './tools/diagnostics/ListEnvironmentVariablesTool.js';
-import { GetConfigValueTool } from './tools/diagnostics/GetConfigValueTool.js';
-import { ReloadConfigTool } from './tools/diagnostics/ReloadConfigTool.js';
-import { DnsLookupTool } from './tools/diagnostics/DnsLookupTool.js';
-import { TestConnectivityTool } from './tools/diagnostics/TestConnectivityTool.js';
-import { ReadCurrentDirectoryTool } from './tools/system/ReadCurrentDirectoryTool.js';
-import { GetCpuUsageTool } from './tools/system/GetCpuUsageTool.js';
-import { GetDiskSpaceTool } from './tools/system/GetDiskSpaceTool.js';
-import { ListProcessesTool } from './tools/system/ListProcessesTool.js';
+import { createAllTools } from './tools/index.js';
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
 
@@ -129,47 +96,9 @@ class CLIServer {
   }
 
   private registerTools(): void {
-    // Register command tools
-    this.toolRegistry.register(new ExecuteCommandTool(this.container));
-    this.toolRegistry.register(new ReadCommandHistoryTool(this.container));
-    this.toolRegistry.register(new StartBackgroundJobTool(this.container));
-    this.toolRegistry.register(new GetJobStatusTool(this.container));
-    this.toolRegistry.register(new GetJobOutputTool(this.container));
-    this.toolRegistry.register(new ExecuteBatchTool(this.container));
-
-    // Register SSH tools
-    this.toolRegistry.register(new SSHExecuteTool(this.container));
-    this.toolRegistry.register(new SSHDisconnectTool(this.container));
-    this.toolRegistry.register(new CreateSSHConnectionTool(this.container));
-    this.toolRegistry.register(new ReadSSHConnectionsTool(this.container));
-    this.toolRegistry.register(new UpdateSSHConnectionTool(this.container));
-    this.toolRegistry.register(new DeleteSSHConnectionTool(this.container));
-    this.toolRegistry.register(new ReadSSHPoolStatusTool(this.container));
-    this.toolRegistry.register(new ValidateSSHConnectionTool(this.container));
-    this.toolRegistry.register(new SFTPUploadTool(this.container));
-    this.toolRegistry.register(new SFTPDownloadTool(this.container));
-    this.toolRegistry.register(new SFTPListDirectoryTool(this.container));
-    this.toolRegistry.register(new SFTPDeleteFileTool(this.container));
-
-    // Register diagnostic tools
-    this.toolRegistry.register(new CheckSecurityConfigTool(this.container));
-    this.toolRegistry.register(new ValidateCommandTool(this.container));
-    this.toolRegistry.register(new ExplainExitCodeTool(this.container));
-    this.toolRegistry.register(new ValidateConfigTool(this.container));
-    this.toolRegistry.register(new ReadSystemInfoTool(this.container));
-    this.toolRegistry.register(new TestConnectionTool(this.container));
-    this.toolRegistry.register(new ReadEnvironmentVariableTool(this.container));
-    this.toolRegistry.register(new ListEnvironmentVariablesTool(this.container));
-    this.toolRegistry.register(new GetConfigValueTool(this.container));
-    this.toolRegistry.register(new ReloadConfigTool(this.container));
-    this.toolRegistry.register(new DnsLookupTool(this.container));
-    this.toolRegistry.register(new TestConnectivityTool(this.container));
-
-    // Register system tools
-    this.toolRegistry.register(new ReadCurrentDirectoryTool(this.container));
-    this.toolRegistry.register(new GetCpuUsageTool(this.container));
-    this.toolRegistry.register(new GetDiskSpaceTool(this.container));
-    this.toolRegistry.register(new ListProcessesTool(this.container));
+    // Register all tools using factory function
+    const tools = createAllTools(this.container);
+    this.toolRegistry.registerBatch(tools);
   }
 
   private setupHandlers(): void {

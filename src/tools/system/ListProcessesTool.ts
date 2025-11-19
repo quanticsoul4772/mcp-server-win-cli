@@ -83,19 +83,13 @@ To enable, add to config.json:
 
     try {
       // Check if process listing is enabled (opt-in security control)
-      // For now, return error - user must explicitly enable
+      // Process listing is disabled by default due to security concerns (MITRE ATT&CK T1057)
+      // Future: Add allowProcessListing to SecurityConfig schema to enable runtime configuration
       return this.error(
         'Process listing is disabled for security. This feature enables process reconnaissance (MITRE ATT&CK T1057). ' +
         'To enable, add "allowProcessListing": true to security config.',
         -2
       );
-
-      // TODO: Check config when feature is fully implemented
-      // const configManager = this.getService<ConfigManager>('ConfigManager');
-      // const security = configManager.getSecurity();
-      // if (!security.allowProcessListing) {
-      //   return this.error('Process listing disabled', -2);
-      // }
 
       // Validate limit
       if (limit < 1 || limit > this.MAX_RESULTS) {
