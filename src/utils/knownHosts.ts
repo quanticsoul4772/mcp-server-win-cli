@@ -9,6 +9,7 @@ import os from 'os';
 import crypto from 'crypto';
 import { lock } from 'proper-lockfile';
 import { Mutex } from 'async-mutex';
+import { loggers } from '../services/Logger.js';
 
 export interface HostKeyEntry {
   /** Host key algorithm (e.g., 'ssh-rsa', 'ecdsa-sha2-nistp256', 'ssh-ed25519') */
@@ -68,7 +69,7 @@ export class KnownHostsManager {
 
       this.initialized = true;
     } catch (error) {
-      console.error('Failed to initialize known hosts:', error instanceof Error ? error.message : String(error));
+      loggers.knownHosts.error('Failed to initialize known hosts', { error: error instanceof Error ? error.message : String(error) });
       throw new Error('Failed to initialize SSH host key verification');
     }
   }
@@ -122,7 +123,7 @@ export class KnownHostsManager {
       const algLength = key.readUInt32BE(0);
       algorithm = key.toString('utf8', 4, 4 + algLength);
     } catch (err) {
-      console.error('Failed to parse key algorithm:', err instanceof Error ? err.message : String(err));
+      loggers.knownHosts.warn('Failed to parse key algorithm', { error: err instanceof Error ? err.message : String(err) });
     }
 
     const existingEntry = this.knownHosts[hostKey];
@@ -131,18 +132,24 @@ export class KnownHostsManager {
       // First time seeing this host
       if (strictMode) {
         // Strict mode: reject unknown hosts
-        console.error(`SECURITY WARNING: Unknown host ${host}:${port}`);
-        console.error(`Host key fingerprint: ${fingerprint}`);
-        console.error('Strict host key checking is enabled. Connection rejected.');
+        loggers.knownHosts.security('Unknown host rejected in strict mode', {
+          host,
+          port,
+          fingerprint,
+          mode: 'strict'
+        });
         return {
           accepted: false,
           reason: `Unknown host ${host}:${port}. Enable TOFU mode (strictHostKeyChecking: false) to accept on first connection.`
         };
       } else {
         // TOFU mode: accept and store the key
-        console.error(`WARNING: Adding new host ${host}:${port} to known hosts (TOFU mode)`);
-        console.error(`Host key fingerprint: ${fingerprint}`);
-        console.error(`Algorithm: ${algorithm}`);
+        loggers.knownHosts.warn('Adding new host to known hosts (TOFU mode)', {
+          host,
+          port,
+          fingerprint,
+          algorithm
+        });
 
         const now = new Date().toISOString();
         const newEntry: HostKeyEntry = {
@@ -176,23 +183,20 @@ export class KnownHostsManager {
         };
       } else {
         // KEY MISMATCH - POSSIBLE MITM ATTACK!
-        console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
-        console.error('!!! CRITICAL SECURITY ALERT: SSH HOST KEY MISMATCH !!!');
-        console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
-        console.error(`Host: ${host}:${port}`);
-        console.error(`Expected fingerprint: ${existingEntry.fingerprint}`);
-        console.error(`Received fingerprint: ${fingerprint}`);
-        console.error(`Expected algorithm: ${existingEntry.algorithm}`);
-        console.error(`Received algorithm: ${algorithm}`);
-        console.error('');
-        console.error('This could indicate:');
-        console.error('  1. A Man-in-the-Middle (MITM) attack in progress');
-        console.error('  2. The host key has been legitimately changed');
-        console.error('  3. DNS spoofing or IP address reassignment');
-        console.error('');
-        console.error('If you trust this new key, manually remove the old entry from:');
-        console.error(`  ${this.knownHostsPath}`);
-        console.error('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+        loggers.knownHosts.securityAlert('SSH HOST KEY MISMATCH - Possible MITM attack!', {
+          host,
+          port,
+          expectedFingerprint: existingEntry.fingerprint,
+          receivedFingerprint: fingerprint,
+          expectedAlgorithm: existingEntry.algorithm,
+          receivedAlgorithm: algorithm,
+          knownHostsPath: this.knownHostsPath,
+          possibleCauses: [
+            'Man-in-the-Middle (MITM) attack in progress',
+            'Host key has been legitimately changed',
+            'DNS spoofing or IP address reassignment'
+          ]
+        });
 
         return {
           accepted: false,
@@ -262,7 +266,7 @@ export class KnownHostsManager {
           }
         }
       } catch (error) {
-        console.error('Failed to update known hosts:', error instanceof Error ? error.message : String(error));
+        loggers.knownHosts.error('Failed to update known hosts', { error: error instanceof Error ? error.message : String(error) });
         throw new Error('Failed to save SSH host key');
       }
     });
@@ -314,7 +318,7 @@ export class KnownHostsManager {
         'utf8'
       );
     } catch (error) {
-      console.error('Failed to remove host from known hosts:', error instanceof Error ? error.message : String(error));
+      loggers.knownHosts.error('Failed to remove host from known hosts', { error: error instanceof Error ? error.message : String(error) });
       throw new Error('Failed to remove SSH host key');
     } finally {
       if (release) {

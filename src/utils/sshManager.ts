@@ -4,6 +4,7 @@ import lockfile from 'proper-lockfile';
 import { ServerConfig, SSHConnectionConfig } from '../types/config.js';
 import { loadConfig as loadMainConfig } from './config.js';
 import { SSHConnectionConfigSchema } from '../types/schemas.js';
+import { loggers } from '../services/Logger.js';
 
 /**
  * Load the current configuration from the config file.
@@ -14,7 +15,7 @@ const loadConfig = (): ServerConfig => {
     const { config } = loadMainConfig();
     return config;
   } catch (error) {
-    console.error('Error loading configuration:', error);
+    loggers.config.error('Error loading configuration', { error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
 };
@@ -62,7 +63,7 @@ const saveConfig = async (config: ServerConfig): Promise<void> => {
     fs.renameSync(tempPath, resolvedPath);
 
   } catch (error) {
-    console.error('Error saving configuration:', error);
+    loggers.config.error('Error saving configuration', { error: error instanceof Error ? error.message : String(error) });
     throw error;
   } finally {
     // Always release the lock
@@ -70,7 +71,7 @@ const saveConfig = async (config: ServerConfig): Promise<void> => {
       try {
         await release();
       } catch (unlockError) {
-        console.error('Error releasing config file lock:', unlockError);
+        loggers.config.error('Error releasing config file lock', { error: unlockError instanceof Error ? unlockError.message : String(unlockError) });
       }
     }
   }

@@ -1,4 +1,5 @@
 import type { CommandHistoryEntry } from '../types/config.js';
+import { loggers } from './Logger.js';
 
 /**
  * HistoryManager Service
@@ -108,7 +109,7 @@ export class HistoryManager {
       if (this.history.length > this.maxSize) {
         const excess = this.history.length - this.maxSize;
         this.history.splice(0, excess);
-        console.error(`Cleaned up ${excess} old command history entries`);
+        loggers.history.debug('Cleaned up old command history entries', { excess });
       }
     }, 5 * 60 * 1000); // 5 minutes
   }

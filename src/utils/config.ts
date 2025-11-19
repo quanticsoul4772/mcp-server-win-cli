@@ -4,6 +4,7 @@ import os from 'os';
 import { ServerConfig, ShellConfig } from '../types/config.js';
 import { secureDeepMerge } from './deepMerge.js';
 import { ServerConfigSchema } from '../types/schemas.js';
+import { loggers } from '../services/Logger.js';
 
 const defaultValidatePathRegex = /^[a-zA-Z]:\\(?:[^<>:"/\\|?*]+\\)*[^<>:"/\\|?*]*$/;
 
@@ -84,11 +85,11 @@ export function loadConfig(configPath?: string): { config: ServerConfig; configP
         const fileContent = fs.readFileSync(location, 'utf8');
         loadedConfig = JSON.parse(fileContent);
         actualConfigPath = location;
-        console.error(`Loaded config from ${location}`);
+        loggers.config.info('Loaded config', { path: location });
         break;
       }
     } catch (error) {
-      console.error(`Error loading config from ${location}:`, error);
+      loggers.config.warn('Error loading config', { path: location, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -126,46 +127,25 @@ function mergeConfigs(defaultConfig: ServerConfig, userConfig: Partial<ServerCon
   if (userProvidedPaths && userProvidedPaths.length > 0) {
     if (merged.security.allowedPaths.length === 0) {
       // Empty allowedPaths after intersection - user will be locked out
-      console.error('\n' + '='.repeat(80));
-      console.error('⚠️  WARNING: Config merge resulted in ZERO allowed paths!');
-      console.error('='.repeat(80));
-      console.error('');
-      console.error('Your config allowedPaths:');
-      userProvidedPaths.forEach(p => console.error(`  - ${p}`));
-      console.error('');
-      console.error('Default config allowedPaths:');
-      defaultConfig.security.allowedPaths.forEach(p => console.error(`  - ${p}`));
-      console.error('');
-      console.error('Merged result: [] (no overlap)');
-      console.error('');
-      console.error('EXPLANATION:');
-      console.error('The secure merge uses INTERSECTION for allowedPaths - paths must exist');
-      console.error('in BOTH the default config AND your user config. This prevents accidentally');
-      console.error('weakening security by adding overly broad paths.');
-      console.error('');
-      console.error('SOLUTIONS:');
-      console.error('1. Use absolute paths that overlap with defaults:');
-      console.error(`   - Current working directory: ${process.cwd()}`);
-      console.error(`   - User home directory: ${os.homedir()}`);
-      console.error('2. Disable path restrictions entirely (NOT recommended):');
-      console.error('   Set "restrictWorkingDirectory": false in your config');
-      console.error('3. Include default paths in your allowedPaths array');
-      console.error('');
-      console.error('='.repeat(80));
-      console.error('');
+      loggers.config.error('Config merge resulted in ZERO allowed paths!', {
+        userPaths: userProvidedPaths,
+        defaultPaths: defaultConfig.security.allowedPaths,
+        mergedResult: [],
+        explanation: 'Secure merge uses INTERSECTION for allowedPaths - paths must exist in BOTH configs',
+        solutions: [
+          `Use absolute paths that overlap with defaults: cwd=${process.cwd()}, home=${os.homedir()}`,
+          'Disable path restrictions: set "restrictWorkingDirectory": false (NOT recommended)',
+          'Include default paths in your allowedPaths array'
+        ]
+      });
     } else if (merged.security.allowedPaths.length < userProvidedPaths.length) {
       // Some paths were filtered out - inform user
       const defaultSet = new Set(defaultConfig.security.allowedPaths.map(p => p.toLowerCase()));
       const filtered = userProvidedPaths.filter(p => !defaultSet.has(p.toLowerCase()));
-      console.error('');
-      console.error('ℹ️  INFO: Some allowedPaths were filtered during secure merge:');
-      console.error('');
-      console.error('Filtered paths (not in default config):');
-      filtered.forEach(p => console.error(`  - ${p}`));
-      console.error('');
-      console.error('Allowed paths (intersection with defaults):');
-      merged.security.allowedPaths.forEach(p => console.error(`  - ${p}`));
-      console.error('');
+      loggers.config.info('Some allowedPaths were filtered during secure merge', {
+        filteredPaths: filtered,
+        allowedPaths: merged.security.allowedPaths
+      });
     }
   }
 

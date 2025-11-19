@@ -3,6 +3,7 @@ import { SSHConnectionConfig } from '../types/config.js';
 import fs from 'fs/promises';
 import { getKnownHostsManager } from './knownHosts.js';
 import SftpClient from 'ssh2-sftp-client';
+import { loggers } from '../services/Logger.js';
 
 export class SSHConnection {
   private client: Client;
@@ -29,17 +30,17 @@ export class SSHConnection {
   private setupClientEvents() {
     this.client
       .on('error', (err) => {
-        console.error(`SSH connection error for ${this.config.host}:`, err.message);
+        loggers.ssh.error('SSH connection error', { host: this.config.host, error: err.message });
         this.isConnected = false;
         this.scheduleReconnect();
       })
       .on('end', () => {
-        console.error(`SSH connection ended for ${this.config.host}`);
+        loggers.ssh.info('SSH connection ended', { host: this.config.host });
         this.isConnected = false;
         this.scheduleReconnect();
       })
       .on('close', () => {
-        console.error(`SSH connection closed for ${this.config.host}`);
+        loggers.ssh.info('SSH connection closed', { host: this.config.host });
         this.isConnected = false;
         this.scheduleReconnect();
       });
@@ -54,7 +55,10 @@ export class SSHConnection {
 
     // Check if we've exceeded max reconnect attempts
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error(`Max reconnection attempts (${this.maxReconnectAttempts}) reached for ${this.config.host}`);
+      loggers.ssh.error('Max reconnection attempts reached', {
+        host: this.config.host,
+        maxAttempts: this.maxReconnectAttempts
+      });
       // Mark connection as permanently failed
       this.isFailed = true;
       // Notify pool to remove this connection
@@ -73,14 +77,19 @@ export class SSHConnection {
       const totalDelay = Math.min(exponentialDelay + jitter, 60000); // Cap at 60 seconds
 
       this.reconnectAttempts++;
-      console.error(
-        `Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} ` +
-        `for ${this.config.host} in ${Math.round(totalDelay)}ms`
-      );
+      loggers.ssh.info('Scheduling reconnect attempt', {
+        host: this.config.host,
+        attempt: this.reconnectAttempts,
+        maxAttempts: this.maxReconnectAttempts,
+        delayMs: Math.round(totalDelay)
+      });
 
       this.reconnectTimer = setTimeout(() => {
         this.attemptReconnect().catch(err => {
-          console.error(`Critical reconnection error for ${this.config.host}:`, err instanceof Error ? err.message : String(err));
+          loggers.ssh.error('Critical reconnection error', {
+            host: this.config.host,
+            error: err instanceof Error ? err.message : String(err)
+          });
           // Error handlers on the client will trigger scheduleReconnect if needed
         });
       }, totalDelay);
@@ -88,9 +97,9 @@ export class SSHConnection {
   }
 
   private async attemptReconnect(): Promise<void> {
-    console.error(`Attempting to reconnect to ${this.config.host}...`);
+    loggers.ssh.info('Attempting to reconnect', { host: this.config.host });
     await this.connect();
-    console.error(`Successfully reconnected to ${this.config.host}`);
+    loggers.ssh.info('Successfully reconnected', { host: this.config.host });
     // Reset attempts on successful connection
     this.reconnectAttempts = 0;
   }
@@ -134,12 +143,15 @@ export class SSHConnection {
             );
 
             if (!result.accepted) {
-              console.error(`Host key verification failed: ${result.reason}`);
+              loggers.ssh.security('Host key verification failed', { host: this.config.host, reason: result.reason });
             }
 
             verify(result.accepted);
           } catch (error) {
-            console.error('Error during host key verification:', error instanceof Error ? error.message : String(error));
+            loggers.ssh.error('Error during host key verification', {
+              host: this.config.host,
+              error: error instanceof Error ? error.message : String(error)
+            });
             verify(false);
           }
         };
@@ -328,7 +340,10 @@ export class SSHConnectionPool {
     }
 
     for (const id of toEvict) {
-      console.error(`Evicting idle SSH connection: ${id} (idle for ${Math.round((now - this.lastAccessTime.get(id)!) / 1000)}s)`);
+      loggers.ssh.debug('Evicting idle SSH connection', {
+        connectionId: id,
+        idleSeconds: Math.round((now - this.lastAccessTime.get(id)!) / 1000)
+      });
       this.closeConnection(id);
     }
   }
@@ -346,7 +361,10 @@ export class SSHConnectionPool {
     }
 
     if (lruId) {
-      console.error(`Pool full, evicting LRU connection: ${lruId} (last used ${Math.round((Date.now() - lruTime) / 1000)}s ago)`);
+      loggers.ssh.info('Pool full, evicting LRU connection', {
+        connectionId: lruId,
+        lastUsedSecondsAgo: Math.round((Date.now() - lruTime) / 1000)
+      });
       this.closeConnection(lruId);
     }
   }
@@ -359,7 +377,7 @@ export class SSHConnectionPool {
 
     // Remove failed connections
     if (connection && connection.hasFailed()) {
-      console.error(`Removing failed connection: ${connectionId}`);
+      loggers.ssh.warn('Removing failed connection', { connectionId });
       await this.closeConnection(connectionId);
       connection = undefined;
     }
@@ -374,7 +392,10 @@ export class SSHConnectionPool {
       connection = new SSHConnection(config, this.strictHostKeyChecking, () => {
         // Remove from pool when permanently failed
         this.closeConnection(connectionId).catch(err => {
-          console.error(`Error removing failed connection ${connectionId}:`, err);
+          loggers.ssh.error('Error removing failed connection', {
+            connectionId,
+            error: err instanceof Error ? err.message : String(err)
+          });
         });
       });
       this.connections.set(connectionId, connection);

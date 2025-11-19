@@ -3,6 +3,8 @@
  * Tracks session state like working directory between commands
  */
 
+import { loggers } from '../services/Logger.js';
+
 interface SessionState {
   workingDirectory: string;
   createdAt: number;
@@ -31,7 +33,7 @@ export class SessionManager {
 
       for (const id of toDelete) {
         this.sessions.delete(id);
-        console.error(`Cleaned up idle session: ${id}`);
+        loggers.session.debug('Cleaned up idle session', { sessionId: id });
       }
     }, 5 * 60 * 1000); // Run every 5 minutes
   }

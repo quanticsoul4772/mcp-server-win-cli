@@ -23,6 +23,7 @@ import { HistoryManager } from './services/HistoryManager.js';
 import { EnvironmentManager } from './services/EnvironmentManager.js';
 import { JobManager } from './services/JobManager.js';
 import { createAllTools } from './tools/index.js';
+import { loggers } from './services/Logger.js';
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
 
@@ -471,8 +472,7 @@ class CLIServer {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
 
-    console.error("Windows CLI MCP Server running on stdio");
-    console.error(`Version: ${packageJson.version}`);
+    loggers.server.info('Windows CLI MCP Server running on stdio', { version: packageJson.version });
   }
 
   async cleanup() {
@@ -499,8 +499,8 @@ class CLIServer {
     if (args['init-config']) {
       const configPath = args['init-config'];
       await createDefaultConfig(configPath);
-      console.error(`Default config file created at: ${configPath}`);
-      console.error('Please review and customize the config, then restart the server with --config flag.');
+      loggers.config.info('Default config file created', { path: configPath });
+      loggers.config.info('Please review and customize the config, then restart the server with --config flag.');
       process.exit(0);
     }
 
@@ -513,14 +513,14 @@ class CLIServer {
 
     // Handle shutdown
     process.on('SIGINT', async () => {
-      console.error('\nShutting down server...');
+      loggers.server.info('Shutting down server...');
       await server.cleanup();
       process.exit(0);
     });
 
     await server.start();
   } catch (error) {
-    console.error('Fatal error:', error);
+    loggers.server.error('Fatal error', { error: error instanceof Error ? error.message : String(error) });
     process.exit(1);
   }
 })();
