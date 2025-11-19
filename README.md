@@ -912,6 +912,31 @@ You can pass custom environment variables to commands for encoding, locale, or o
 - Use `check_security_config` with `"category": "environment"` to see blocked variables
 - In allowlist mode, only explicitly allowed variables can be set
 
+**PowerShell Unicode Display Limitation:**
+
+PowerShell's default console encoding may not display Unicode characters correctly (showing `??` instead of emojis/special characters). This is a PowerShell console limitation, not a server issue - the environment variables ARE set correctly.
+
+**Workarounds:**
+1. **Use GitBash** for Unicode-heavy workflows - it handles UTF-8 natively:
+   ```json
+   {
+     "shell": "gitbash",
+     "command": "/c/path/to/python.exe -c \"import os; print(os.environ.get('MESSAGE'))\"",
+     "env": { "MESSAGE": "Hello 世界 🎉", "PYTHONIOENCODING": "utf-8" }
+   }
+   ```
+
+2. **Set PowerShell encoding** at the start of your command:
+   ```json
+   {
+     "shell": "powershell",
+     "command": "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output $env:MESSAGE",
+     "env": { "MESSAGE": "Hello 世界 🎉" }
+   }
+   ```
+
+3. **Configure shell defaultEnv** to always set UTF-8 encoding (see [Shell Configuration](#shell-configuration))
+
 **Related Configuration:**
 See [Security Settings](#security-settings) for `commandTimeout` and [SSH Configuration](#ssh-configuration) for `defaultTimeout`.
 
