@@ -298,10 +298,11 @@ describe('Unicode Attack Vectors', () => {
       expect(containsDangerousCharacters(safeCommand)).toBe(false);
     });
 
-    test('should allow newline (U+000A)', () => {
-      // Newline is explicitly allowed
-      const safeCommand = 'echo\ntest';
-      expect(containsDangerousCharacters(safeCommand)).toBe(false);
+    test('should block newline (U+000A) used as a statement separator', () => {
+      // Newlines are blocked: shells treat them as statement separators, so
+      // allowing them lets a second statement bypass command/operator blocking.
+      const maliciousCommand = 'echo\ntest';
+      expect(containsDangerousCharacters(maliciousCommand)).toBe(true);
     });
 
     test('should block vertical tab (U+000B)', () => {
@@ -314,10 +315,11 @@ describe('Unicode Attack Vectors', () => {
       expect(containsDangerousCharacters(maliciousCommand)).toBe(true);
     });
 
-    test('should allow carriage return (U+000D) for Windows line endings', () => {
-      // Carriage return is allowed since Windows uses \r\n line endings
-      const windowsCommand = 'echo\rtest';
-      expect(containsDangerousCharacters(windowsCommand)).toBe(false);
+    test('should block carriage return (U+000D) used as a statement separator', () => {
+      // CR is blocked for the same reason as LF; it can act as a separator and
+      // mask a second statement from the first-token-only command check.
+      const maliciousCommand = 'echo\rtest';
+      expect(containsDangerousCharacters(maliciousCommand)).toBe(true);
     });
 
     test('should block escape (U+001B)', () => {

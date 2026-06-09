@@ -480,10 +480,32 @@ describe('Command Injection Attack Vectors', () => {
     });
 
     test('should not be bypassed by line continuation', () => {
-      // Even with newlines, operators should be blocked
+      // Blocked either by the newline (control-character) check or the operator
+      // check — both fire for this input; the newline check runs first.
       const maliciousCommand = 'dir |\ndel /q *';
       expect(() => validateShellOperators(maliciousCommand, mockShellConfig))
-        .toThrow(/blocked operator.*\|/);
+        .toThrow(/control character|blocked operator.*\|/i);
+    });
+
+    test('should block a newline used as a statement separator (no operator present)', () => {
+      // Shells treat a bare newline as a statement separator. parseCommand only
+      // inspects the first token, so without blocking the newline itself the
+      // second statement ('shutdown') would smuggle past command blocking.
+      const maliciousCommand = 'echo hello\nshutdown /s /t 0';
+      expect(() => validateShellOperators(maliciousCommand, mockShellConfig))
+        .toThrow(/control character/i);
+    });
+
+    test('should block a carriage return used as a statement separator', () => {
+      const maliciousCommand = 'echo hello\rshutdown /s /t 0';
+      expect(() => validateShellOperators(maliciousCommand, mockShellConfig))
+        .toThrow(/control character/i);
+    });
+
+    test('should still allow tab as whitespace', () => {
+      // Tab is the one control character that remains permitted (argument spacing)
+      expect(() => validateShellOperators('echo\thello', mockShellConfig))
+        .not.toThrow();
     });
   });
 

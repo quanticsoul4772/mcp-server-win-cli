@@ -234,9 +234,11 @@ describe('Dangerous Character Detection (v0.3.0)', () => {
     expect(containsDangerousCharacters('command with spaces')).toBe(false);
   });
 
-  test('containsDangerousCharacters allows tabs and newlines', () => {
+  test('containsDangerousCharacters allows tabs but blocks newlines and carriage returns', () => {
     expect(containsDangerousCharacters('command\ttab')).toBe(false);
-    expect(containsDangerousCharacters('command\nnewline')).toBe(false);
+    // Newlines/CR are statement separators in shells and must be blocked
+    expect(containsDangerousCharacters('command\nnewline')).toBe(true);
+    expect(containsDangerousCharacters('command\rreturn')).toBe(true);
   });
 });
 
