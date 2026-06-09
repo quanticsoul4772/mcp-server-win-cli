@@ -1,6 +1,11 @@
 import { describe, test, expect, beforeEach } from '@jest/globals';
 import { CommandExecutor } from '../../src/services/CommandExecutor.js';
+import { SecurityManager } from '../../src/services/SecurityManager.js';
 import type { ServerConfig } from '../../src/types/config.js';
+
+function makeSecurityManager(cfg: ServerConfig): SecurityManager {
+  return new SecurityManager(cfg, new Set(cfg.security.blockedCommands), null);
+}
 
 describe('CommandExecutor', () => {
   let mockConfig: ServerConfig;
@@ -50,7 +55,7 @@ describe('CommandExecutor', () => {
       }
     };
 
-    executor = new CommandExecutor(mockConfig, mockConfig.security.allowedPaths, null);
+    executor = new CommandExecutor(mockConfig, mockConfig.security.allowedPaths, null, makeSecurityManager(mockConfig));
   });
 
   describe('execute()', () => {
@@ -126,17 +131,19 @@ describe('CommandExecutor', () => {
     }, 10000);
 
     test('should reject working directory outside allowed paths when restricted', async () => {
+      const restrictedConfig = {
+        ...mockConfig,
+        security: {
+          ...mockConfig.security,
+          restrictWorkingDirectory: true,
+          allowedPaths: ['C:\\AllowedPath']
+        }
+      };
       const restrictedExecutor = new CommandExecutor(
-        {
-          ...mockConfig,
-          security: {
-            ...mockConfig.security,
-            restrictWorkingDirectory: true,
-            allowedPaths: ['C:\\AllowedPath']
-          }
-        },
+        restrictedConfig,
         ['C:\\AllowedPath'],
-        null
+        null,
+        makeSecurityManager(restrictedConfig)
       );
 
       await expect(
@@ -149,17 +156,19 @@ describe('CommandExecutor', () => {
     }, 10000);
 
     test('should allow working directory when restriction disabled', async () => {
+      const unrestrictedConfig = {
+        ...mockConfig,
+        security: {
+          ...mockConfig.security,
+          restrictWorkingDirectory: false,
+          allowedPaths: ['C:\\AllowedPath']
+        }
+      };
       const unrestrictedExecutor = new CommandExecutor(
-        {
-          ...mockConfig,
-          security: {
-            ...mockConfig.security,
-            restrictWorkingDirectory: false,
-            allowedPaths: ['C:\\AllowedPath']
-          }
-        },
+        unrestrictedConfig,
         ['C:\\AllowedPath'],
-        null
+        null,
+        makeSecurityManager(unrestrictedConfig)
       );
 
       const result = await unrestrictedExecutor.execute({
@@ -253,9 +262,11 @@ describe('CommandExecutor', () => {
 
   describe('integration tests', () => {
     test('should handle PowerShell with multiple output lines', async () => {
+      // Comma builds an array, yielding two output lines without a shell operator
+      // (operators like ';' are blocked by SecurityManager validation)
       const result = await executor.execute({
         shell: 'powershell',
-        command: 'Write-Output "line1"; Write-Output "line2"'
+        command: 'Write-Output line1,line2'
       });
 
       expect(result.exitCode).toBe(0);
@@ -263,10 +274,10 @@ describe('CommandExecutor', () => {
       expect(result.output).toContain('line2');
     }, 10000);
 
-    test('should handle CMD with echo off', async () => {
+    test('should handle CMD echo output', async () => {
       const result = await executor.execute({
         shell: 'cmd',
-        command: '@echo off & echo test'
+        command: 'echo test'
       });
 
       expect(result.output).toContain('test');

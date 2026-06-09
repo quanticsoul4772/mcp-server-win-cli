@@ -3,6 +3,7 @@ import { canonicalizePath, isPathAllowed } from '../utils/validation.js';
 import { sanitizePathError, createUserFriendlyError } from '../utils/errorSanitizer.js';
 import type { ServerConfig } from '../types/config.js';
 import { EnvironmentManager } from './EnvironmentManager.js';
+import type { SecurityManager } from './SecurityManager.js';
 
 /**
  * Result of command execution
@@ -55,7 +56,8 @@ export class CommandExecutor {
   constructor(
     private readonly config: ServerConfig,
     private readonly allowedPaths: string[],
-    private readonly configPath: string | null
+    private readonly configPath: string | null,
+    private readonly securityManager: SecurityManager
   ) {}
 
   /**
@@ -110,6 +112,12 @@ export class CommandExecutor {
    */
   async execute(options: CommandExecutionOptions): Promise<CommandExecutionResult> {
     const { shell, command, workingDir: userWorkingDir, timeout, env: userEnv } = options;
+
+    // Multi-stage security validation (operators, blocked commands/arguments,
+    // length, env vars). Enforced here so every caller — execute_command,
+    // execute_batch, and any future tool routing through CommandExecutor —
+    // is validated; tools cannot skip it.
+    this.securityManager.validateCommand(shell, command, userEnv);
 
     // Validate and canonicalize working directory
     const workingDir = await this.validateWorkingDirectory(userWorkingDir, userWorkingDir);

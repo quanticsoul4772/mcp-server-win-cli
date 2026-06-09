@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
@@ -585,7 +586,7 @@ export function parseCommand(fullCommand: string): { command: string; args: stri
 export function canonicalizePath(inputPath: string): string {
     try {
         // Use realpathSync to resolve all symbolic links, junctions, and relative paths
-        const realPath = require('fs').realpathSync(inputPath, { encoding: 'utf8' });
+        const realPath = fs.realpathSync(inputPath, { encoding: 'utf8' });
         return path.normalize(realPath);
     } catch (error) {
         // If path doesn't exist or can't be resolved, normalize it anyway
