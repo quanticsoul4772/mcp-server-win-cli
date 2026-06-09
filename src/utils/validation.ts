@@ -137,8 +137,11 @@ export function containsDangerousCharacters(command: string): boolean {
         return true;
     }
 
-    // Check for other dangerous control characters (except newline and tab)
-    const dangerousControlChars = /[\x01-\x08\x0B-\x0C\x0E-\x1F\x7F]/;
+    // Check for other dangerous control characters (tab is the only allowed one).
+    // Newline (\x0A) and carriage return (\x0D) MUST be blocked: shells treat them
+    // as statement separators, so allowing them lets a command smuggle a second
+    // statement past command/operator blocking (which only inspects the first token).
+    const dangerousControlChars = /[\x01-\x08\x0A-\x1F\x7F]/;
     return dangerousControlChars.test(command);
 }
 
