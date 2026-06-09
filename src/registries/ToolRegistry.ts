@@ -128,11 +128,28 @@ export class ToolRegistry {
    * @param name - Tool name
    * @param args - Tool arguments
    * @returns Tool execution result
-   * @throws McpError if tool not found or execution fails
+   * @throws McpError if tool not found, validation fails, or execution fails
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async execute(name: string, args: any): Promise<ToolResult> {
     const tool = this.get(name);
+
+    // Validate required parameters BEFORE execution
+    const schema = tool.getInputSchema();
+    if (schema.required && Array.isArray(schema.required)) {
+      const missingParams: string[] = [];
+      for (const requiredParam of schema.required) {
+        if (args === undefined || args === null || !(requiredParam in args) || args[requiredParam] === undefined) {
+          missingParams.push(requiredParam);
+        }
+      }
+      if (missingParams.length > 0) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Missing required parameter${missingParams.length > 1 ? 's' : ''}: ${missingParams.join(', ')}`
+        );
+      }
+    }
 
     try {
       return await tool.execute(args);

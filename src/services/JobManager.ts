@@ -1,6 +1,7 @@
 import type { ConfigManager } from './ConfigManager.js';
 import { spawn, type ChildProcess } from 'child_process';
 import { EnvironmentManager } from './EnvironmentManager.js';
+import type { SecurityManager } from './SecurityManager.js';
 
 export interface Job {
   id: string;
@@ -28,7 +29,10 @@ export class JobManager {
   private nextJobId: number = 1;
   private cleanupTimer: NodeJS.Timeout | null = null;
 
-  constructor(private configManager: ConfigManager) {
+  constructor(
+    private configManager: ConfigManager,
+    private securityManager: SecurityManager
+  ) {
     // Periodic cleanup of completed jobs older than 1 hour
     this.cleanupTimer = setInterval(() => {
       this.cleanupOldJobs();
@@ -70,6 +74,11 @@ export class JobManager {
     timeout: number = 300,
     env?: Record<string, string>
   ): string {
+    // Multi-stage security validation (operators, blocked commands/arguments,
+    // length, env vars). Enforced here so background jobs cannot bypass the
+    // validation pipeline that execute_command goes through.
+    this.securityManager.validateCommand(shell, command, env);
+
     // Check job limit
     if (this.jobs.size >= this.maxJobs) {
       this.cleanupOldJobs();

@@ -31,7 +31,7 @@ describe('MCP Resources Compliance', () => {
     const blockedCommands = new Set(config.security.blockedCommands);
     securityManager = new SecurityManager(config, blockedCommands, null);
     historyManager = new HistoryManager(config.security.maxHistorySize, config.security.logCommands);
-    const commandExecutor = new CommandExecutor(config, config.security.allowedPaths, null);
+    const commandExecutor = new CommandExecutor(config, config.security.allowedPaths, null, securityManager);
     sshPool = new SSHConnectionPool(config.ssh.strictHostKeyChecking);
 
     container.registerInstance('ConfigManager', configManager);

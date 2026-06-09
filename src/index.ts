@@ -74,9 +74,9 @@ class CLIServer {
 
     const securityManager = new SecurityManager(config, blockedCommands, configPath);
     const historyManager = new HistoryManager(config.security.maxHistorySize, config.security.logCommands);
-    const commandExecutor = new CommandExecutor(config, config.security.allowedPaths, configPath);
+    const commandExecutor = new CommandExecutor(config, config.security.allowedPaths, configPath, securityManager);
     const environmentManager = new EnvironmentManager(configManager);
-    const jobManager = new JobManager(configManager);
+    const jobManager = new JobManager(configManager, securityManager);
 
     this.container.registerInstance('ConfigManager', configManager);
     this.container.registerInstance('SecurityManager', securityManager);
