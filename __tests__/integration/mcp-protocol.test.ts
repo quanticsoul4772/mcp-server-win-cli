@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from '@jest/globals';
+import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { ToolRegistry } from '../../src/registries/ToolRegistry.js';
 import { ServiceContainer } from '../../src/server/ServiceContainer.js';
 import { ConfigManager } from '../../src/services/ConfigManager.js';
@@ -311,13 +312,17 @@ describe('MCP Protocol Compliance', () => {
     });
 
     it('should reject missing required parameters', async () => {
-      const result = await toolRegistry.execute('execute_command', {
+      // Missing required params is an input/protocol validation error, caught at
+      // the registry layer before the tool runs. Like an unknown tool, it is
+      // surfaced as a thrown McpError (JSON-RPC error), not a tool-execution
+      // result with isError: true.
+      const call = toolRegistry.execute('execute_command', {
         shell: 'powershell'
         // missing 'command' parameter
       } as any);
 
-      // Should return an error result
-      expect(result.isError).toBe(true);
+      await expect(call).rejects.toThrow(McpError);
+      await expect(call).rejects.toMatchObject({ code: ErrorCode.InvalidParams });
     });
 
     it('should handle optional parameters correctly', async () => {
